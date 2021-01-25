@@ -4,7 +4,8 @@ library(dplyr)
 library(nationalparkcolors)
 pal<-park_palette('Saguaro',5)
 ##first run quizartinib data
-amlresistancenetworks::synapseLogin()
+
+syn<-amlresistancenetworks::synapseLogin()
 protData<-amlresistancenetworks::querySynapseTable('syn23595222')%>%
   subset(!is.nan(value))%>%
   mutate(Gene=unlist(Gene))%>%
@@ -17,11 +18,6 @@ phosData<-amlresistancenetworks::querySynapseTable('syn23595223')%>%
   mutate(site=unlist(site))%>%
   rename(LogRatio='value')
   #  mutate(Molecular='Phosphosite')
-
-#full.quiz.prot<-quizPhosData%>%
-#  dplyr::select(Gene='site',LogRatio='value',sample='Sample',CellType='cellLine',Molecular,Treatment='Ligand')%>%
-#  rbind(dplyr::select(quizProtData,c(Gene,LogRatio='value',sample='Sample',CellType='cellLine',Molecular,Treatment='Ligand')))
-
 
 kindat<-amlresistancenetworks::mapPhosphoToKinase(dplyr::rename(phosData,LogFoldChange='LogRatio'))
 
