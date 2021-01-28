@@ -1,105 +1,7 @@
 ##process cytokine data
-#library(amlresistancenetworks)
+library(amlresistancenetworks)
 library(dplyr)
-library(ggalluvial)
-library(stringr)
-library(reticulate)
-library(KSEAapp)
-library(readr)
-library(ggfortify)
-library(cowplot)
-##put your own conda environment with synapseclient here
-condaenv="C:\\Users\\gosl241\\OneDrive - PNNL\\Documents\\GitHub\\amlresistancenetworks\\renv\\python\\r-reticulate\\"
 
-#' Logs into Synapse using local information
-#' @import reticulate
-#' @return Synapse login python entity
-#' @export
-synapseLogin<-function(){
-  library(reticulate)
-  reticulate::use_condaenv(condaenv)
-  syn=reticulate::import('synapseclient')
-  sync=syn$login()
-  return(sync)
-}
-
-#' query synapse table
-#' This is how you get data from the project
-#' @param tableid
-#' @export
-querySynapseTable<-function(tableid){
-  syn=synapseLogin()
-  res<-syn$tableQuery(paste('select * from',tableid))$asDataFrame()
-  if('Gene'%in%names(res))
-    res$Gene<-unlist(res$Gene)
-  if('site'%in%names(res))
-    res$site<-unlist(res$site)
-  return(res)
-}
-
-
-#' compute kinase substrate enrichment - osama's code wrapped in package.
-#' @export
-#' @import KSEAapp
-#' @import readr
-#' @import dplyr
-#' @author Osama, Jason
-#' @param genes.with.values of genes and difference values
-#' @param prot.univ the space of all proteins we are considering
-#' @return KSEA output type stuff
-computeKSEA<-function(genes.with.values,ksea_FDR=0.05,prefix=''){
-  library(KSEAapp)
-  
-  inputdfforKSEA <- data.frame(Protein=rep("NULL", nrow(genes.with.values)), 
-                               Gene=genes.with.values$Gene,
-                               Peptide=rep("NULL", nrow(genes.with.values)),
-                               Residue.Both=genes.with.values$residue,
-                               p=genes.with.values$p_adj,
-                               FC=2^(genes.with.values$value), stringsAsFactors = F)
-  
-  #read kinase substrate database stored in data folder
-  KSDB <- read.csv('PSP&NetworKIN_Kinase_Substrate_Dataset_July2016.csv',stringsAsFactors = FALSE)
-  
-  #' * KSEA using not only the known substrates in PSP but also the predicted substrates in NetworKIN
-  res<-KSEA.Complete(KSDB, inputdfforKSEA, NetworKIN=FALSE, NetworKIN.cutoff=5, m.cutoff=5, p.cutoff=ksea_FDR)
-  file.remove("KSEA Bar Plot.tiff")#,paste0(prefix,'_KSEABarPlot.tiff'))
-  subs <- read.csv("Kinase-Substrate Links.csv")
-  #make own plot of KSEA results
-  res_ksea <- readr::read_csv("KSEA Kinase Scores.csv")
-  file.remove("Kinase-Substrate Links.csv")#,paste0(prefix,'_kinaseSubsLinks.csv'))
-  
-  plot_KSEA <- res_ksea %>% 
-    #mutate(p.value = p.adjust(p.value)) %>% 
-    filter(m >= 5) %>% 
-    arrange(desc(z.score)) %>% 
-    mutate(status = case_when(z.score > 0 & p.value <= ksea_FDR ~ "Up",
-                              z.score < 0 & p.value <= ksea_FDR ~ "Down",
-                              TRUE ~ "Not significant")) %>% 
-    filter(status != "Not significant") %>%
-    ggplot(aes(x=reorder(Kinase.Gene, z.score), y=z.score)) +
-    geom_bar(stat='identity', aes(fill=status)) +
-    scale_fill_manual(values = c("Down" = "blue", "Up" = "red", "Not significant" = "black")) +
-    coord_flip() +
-    theme(legend.position="none", 
-          axis.title.x = element_text(size=16),
-          axis.title.y = element_blank(), 
-          axis.text.x = element_text(size = 14),
-          axis.text.y=element_text(size = 14),
-          axis.line.y = element_blank(),
-          axis.ticks.y = element_blank()) +
-    labs(y="Kinase z-score") #for some reason labs still works with orientation before cord flip so set y 
-  file.remove("KSEA Kinase Scores.csv")#paste0(prefix,'kinaseScores.csv'))
-  
-  ##join results
-  #kin_res
-  res_ksea<-res_ksea%>%
-    rename(`aveSubstrateLog2FC`='log2FC')%>%
-    left_join(subs,by='Kinase.Gene')
-  
-  ggsave(paste0(prefix,"fig_KSEA.pdf"), plot_KSEA, height = 8.5, width = 11, units = "in")
-  write.table(res_ksea,paste0(prefix,'_kseaRes.csv'),sep=',')
-  return(res_ksea)
-}
 
 ##first run gilteritinib data
 protData<-querySynapseTable('syn22156807')%>%mutate(Gene=unlist(Gene))%>%
@@ -112,7 +14,6 @@ phosData<-querySynapseTable('syn22156809')%>%subset(!is.nan(value))%>%
   mutate(site=unlist(site))%>%
   dplyr::rename(LogRatio='value')%>%
   dplyr::rename(sample='Sample')
-
 
 syn<-synapseLogin()
 targ.data<-read.csv2(syn$get('syn22214245')$path,sep='\t',header=T)%>%
@@ -164,6 +65,66 @@ plotAllData<-function(dat.table,vars=c('sample','cellLine','ligand','treatment')
  
 }
 
+#' plotKSEAinHeatmap
+#' Plots results of KSEA in heatmap across all kinase data
+#' @param kindat
+#' @param ksres
+#' @param vars to plot
+plotKSEAinHeatmap<-function(kindat,ksres,vars){
+  
+  ksres%>%subset(p.value<0.05)%>%select(Kinase.Gene,Condition)%>%
+    distinct()%>%
+    group_by(Condition)%>%
+    group_map(~ plotKinDat(kindat,prefix=.y$Condition,vars=vars,genelist=.x$Kinase.Gene))
+  
+}
+
+#' plots all kinase activity in a heatmap
+#' @param kindat list of kinases and their summarized activity in each sample
+#' @param prefix
+#' @param vars clinical variables
+#' @param genelist filter for these genes
+plotKinDat<-function(kindat,prefix='all',vars=c('sample','time','ligand','treatment'),genelist=c()){
+  library(pheatmap)
+  ##create matrix of kinase scores
+  if(length(genelist)>0)
+    kindat<-kindat%>%subset(Kinase%in%genelist)
+  print(genelist)
+  
+  mat <-kindat%>%
+    ungroup()%>%
+    tidyr::pivot_wider(-c(meanNKINscore,numSubstr),
+                        values_from=meanLFC,
+                        names_from=Sample,
+                      values_fn=list(meanLFC=mean))%>%
+    tibble::column_to_rownames('Kinase')
+  
+  kinAts<-kindat%>%ungroup()%>%dplyr::select(Kinase,numSubstr)%>%distinct()%>%
+    group_by(Kinase)%>%summarize(substrates=mean(numSubstr))%>%
+        tibble::remove_rownames()%>%
+  tibble::column_to_rownames('Kinase')
+  
+  sampAts<-phosData%>%dplyr::select(vars)%>%
+    distinct()%>%
+        tibble::remove_rownames()%>%
+    tibble::column_to_rownames('sample')
+  
+  #sampAts$TimePoint=as.factor(sampAts$TimePoint)
+  all.vars<-sort(apply(mat,1,var),decreasing=T)
+  all.vars<-all.vars[which(all.vars!=0)]
+  if(length(genelist)==0){
+    vars=names(all.vars)[1:150]
+  }else{
+    vars=intersect(genelist,names(all.vars))
+  }
+  
+ pheatmap(mat[vars,],cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
+          clustering_distance_rows = 'correlation',
+          annotation_row = kinAts,annotation_col=sampAts,
+          file=paste0(prefix,'KinaseHeatmap.pdf'),height=20,width=8) 
+}
+
+
 
 #' plot all the KSEA 
 #' @param condList
@@ -195,17 +156,16 @@ doAllKSEAplots<-function(condList,pdat=phosData){
   ggsave('pcaOfSamples.png')
   
 
-    amlresistancenetworks::plotKinDat(kindat,phosData,
-                                    idcol='sample',prefix='giltResistance',
-                                    vars=c("sample","cellLine","ligand"))
+      clinvars = c("sample","cellLine","treatment","ligand")
+    plotKinDat(kindat,prefix='giltResistance',
+                                    vars=clinvars)
 
-    clinvars = c("sample","cellLine","treatment","ligand")
+
   ##what are we doing again?
   summary<-protData%>%dplyr::select(clinvars)%>%distinct()%>%rowwise()%>%
     mutate(Condition=stringr::str_c(cellLine,treatment,ligand,sep='_'))
   print(summary)
   
-   plotKinDat(kindat,phosData,'giltResistance',idcol='sample',c('cellLine','treatment','ligand','sample'))
   
    earlyLateProt<-list(gilt_late_early_flt3 =limmaTwoFactorDEAnalysis(protMat,
                                                         filter(summary,Condition=='MOLM14_Early Gilteritinib_FLT3')$sample,
@@ -276,15 +236,17 @@ earlyLateCombPhos<-list( gilt_early_vs_parental_comb =limmaTwoFactorDEAnalysis(p
 
   
 ph2<-doAllKSEAplots(earlyLateCombPhos)
+plotKSEAinHeatmap(kindat,ph2,clinvars)
 
 ph3<-doAllKSEAplots(earlyLateMv411Phos)
+plotKSEAinHeatmap(kindat,ph3,clinvars)
 
 ph4<-doAllKSEAplots(earlyLateMolmPhos)
-
+plotKSEAinHeatmap(kindat,ph4,clinvars)
 ##plot single kinase/substrate expression of mapk3, mapk1, and mapk8
 p5<-kindat%>%
   left_join(dplyr::rename(summary,Sample='sample'))%>%
-  subset(Kinase%in%c('NRAS','AURKB'))%>%
+  subset(Kinase%in%c('CDC7','AURKB'))%>%
   ggplot(aes(x=as.factor(ligand),y=meanLFC,fill=treatment))+
   geom_boxplot()+
   facet_grid(~Kinase)+scale_fill_viridis_d()+facet_grid(~cellLine)+

@@ -52,6 +52,64 @@ phosMat<-phosData%>%dplyr::select(Sample,site,LogRatio)%>%
   tibble::column_to_rownames('site')
 
 
+
+#' plotKSEAinHeatmap
+#' Plots results of KSEA in heatmap across all kinase data
+#' @param kindat
+#' @param ksres
+#' @param vars to plot
+plotKSEAinHeatmap<-function(kindat,ksres,vars){
+  
+   ksres%>%subset(p.value<0.05)%>%select(Kinase.Gene,Condition)%>%
+    distinct()%>%
+    group_by(Condition)%>%
+    group_map(~ plotKinDat(kindat,prefix=.y$Condition,vars=vars,genelist=.x$Kinase.Gene))
+      
+}
+
+#' plots all kinase activity in a heatmap
+#' @param kindat list of kinases and their summarized activity in each sample
+#' @param prefix
+#' @param vars clinical variables
+#' @param genelist filter for these genes
+plotKinDat<-function(kindat,prefix='all',vars=c('sample','time','ligand','treatment'),genelist=c()){
+  library(pheatmap)
+  ##create matrix of kinase scores
+  if(length(genelist)>0)
+    kindat<-kindat%>%subset(Kinase%in%genelist)
+  print(genelist)
+  mat <-kindat%>%
+    ungroup()%>%
+    tidyr::pivot_wider(-c(meanNKINscore,numSubstr),
+                        values_from=meanLFC,
+                        names_from=Sample,
+                      values_fn=list(meanLFC=mean))%>%
+    tibble::column_to_rownames('Kinase')
+  kinAts<-kindat%>%ungroup()%>%dplyr::select(Kinase,numSubstr)%>%distinct()%>%
+    group_by(Kinase)%>%summarize(substrates=mean(numSubstr))%>%
+        tibble::remove_rownames()%>%
+  tibble::column_to_rownames('Kinase')
+  
+  sampAts<-phosData%>%dplyr::select(vars)%>%
+    distinct()%>%
+        tibble::remove_rownames()%>%
+    tibble::column_to_rownames('Sample')
+  #sampAts$TimePoint=as.factor(sampAts$TimePoint)
+  all.vars<-sort(apply(mat,1,var),decreasing=T)
+  all.vars<-all.vars[which(all.vars!=0)]
+  if(length(genelist)==0){
+    vars=names(all.vars)[1:150]
+  }else{
+    vars=intersect(genelist,names(all.vars))
+  }
+ pheatmap(mat[vars,],cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
+          clustering_distance_rows = 'correlation',
+          annotation_row = kinAts,annotation_col=sampAts,
+          file=paste0(prefix,'KinaseHeatmap.pdf'),height=20,width=8) 
+}
+
+
+
 library(ggplot2)
 library(ggalluvial)
 library(ggridges)
@@ -225,12 +283,18 @@ p4<-plotConditionsInFlow(earlyLateProt,title='Early Late Prot',0.05)
 ggsave('earlyLateProt.png',p4,width=11,height=6)
 #ph4<-doAllGOplots(p4)
 
+clinvars=c('Sample','cellLine','Ligand')
 p5<-plotConditionsInFlow(earlyParentalPhos,title='Early Parental Phos',0.05)
 ggsave('earlyParentalPhos.png',p5,width=11,height=6)
 ph5<-doAllKSEAplots(earlyParentalPhos)
 ph6<-doAllKSEAplots(lateParentalPhos)
 ph7<-doAllKSEAplots(resistParentalPhos)
+plotKSEAinHeatmap(kindat,ph3,clinvars)
 
+plotKSEAinHeatmap(kindat,ph5,clinvars)
+
+plotKSEAinHeatmap(kindat,ph6,clinvars)
+plotKSEAinHeatmap(kindat,ph7,clinvars)
 
 #resdf<-do.call(rbind,lapply(names(earlyLateProt),function(x) data.frame(earlyLateProt[[x]],Condition=x)))
 
@@ -245,7 +309,7 @@ ph7<-doAllKSEAplots(resistParentalPhos)
 ##plot single kinase/substrate expression of mapk3, mapk1, and mapk8
 p5<-kindat%>%
   left_join(dplyr::rename(summary,Sample='Sample'))%>%
-  subset(Kinase%in%c('NRAS','AURKB'))%>%
+  subset(Kinase%in%c('CDC7','AURKB'))%>%
   ggplot(aes(x=as.factor(Ligand),y=meanLFC,fill=cellLine))+
   geom_boxplot()+
   facet_grid(~Kinase)+scale_fill_viridis_d()+

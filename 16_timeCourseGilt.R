@@ -43,13 +43,37 @@ plotAllData<-function(dat.table,vars=c('sample','cellLine','ligand','treatment')
  
 }
 
-plotKinDat<-function(kindat,prefix='all',vars=c('sample','time','ligand','treatment')){
+#' plotKSEAinHeatmap
+#' Plots results of KSEA in heatmap across all kinase data
+#' @param kindat
+#' @param ksres
+#' @param vars to plot
+plotKSEAinHeatmap<-function(kindat,ksres,vars){
+  
+   ksres%>%subset(p.value<0.05)%>%select(Kinase.Gene,Condition)%>%
+    distinct()%>%
+    group_by(Condition)%>%
+    group_map(~ plotKinDat(kindat,prefix=.y$Condition,vars=vars,genelist=.x$Kinase.Gene))
+      
+}
+
+#' plots all kinase activity in a heatmap
+#' @param kindat list of kinases and their summarized activity in each sample
+#' @param prefix
+#' @param vars clinical variables
+#' @param genelist filter for these genes
+plotKinDat<-function(kindat,prefix='all',vars=c('sample','time','ligand','treatment'),genelist=c()){
   library(pheatmap)
   ##create matrix of kinase scores
-  mat <-kindat%>%ungroup()%>%tidyr::pivot_wider(-c(meanNKINscore,numSubstr),
-                                                values_from=meanLFC,
-                                                names_from=Sample,
-                                                values_fn=list(meanLFC=mean))%>%
+  if(length(genelist)>0)
+    kindat<-kindat%>%subset(Kinase%in%genelist)
+  print(genelist)
+  mat <-kindat%>%
+    ungroup()%>%
+    tidyr::pivot_wider(-c(meanNKINscore,numSubstr),
+                        values_from=meanLFC,
+                        names_from=Sample,
+                      values_fn=list(meanLFC=mean))%>%
     tibble::column_to_rownames('Kinase')
   kinAts<-kindat%>%ungroup()%>%dplyr::select(Kinase,numSubstr)%>%distinct()%>%
     group_by(Kinase)%>%summarize(substrates=mean(numSubstr))%>%
@@ -61,7 +85,13 @@ plotKinDat<-function(kindat,prefix='all',vars=c('sample','time','ligand','treatm
         tibble::remove_rownames()%>%
     tibble::column_to_rownames('sample')
   #sampAts$TimePoint=as.factor(sampAts$TimePoint)
-  vars=names(sort(apply(mat,1,var),decreasing=T)[1:150])
+  all.vars<-sort(apply(mat,1,var),decreasing=T)
+  all.vars<-all.vars[which(all.vars!=0)]
+  if(length(genelist)==0){
+    vars=names(all.vars)[1:150]
+  }else{
+    vars=intersect(genelist,names(all.vars))
+  }
  pheatmap(mat[vars,],cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
           clustering_distance_rows = 'correlation',
           annotation_row = kinAts,annotation_col=sampAts,
@@ -126,10 +156,10 @@ doAllGOplots<-function(condList){
     condList[[clName]]%>%
       tibble::rownames_to_column('Gene')%>%
       dplyr::select(Gene,value='logFC')%>%
-      amlresistancenetworks::plotOldGSEA(.,prefix=clName,0.1)%>%
+      amlresistancenetworks::plotOldGSEA(.,prefix=clName,0.05)%>%
       as.data.frame()
   })
-  
+  return(full.df)
 }
 
 #' plot all the KSEA 
@@ -179,7 +209,7 @@ runNetworksFromDF<-function(data,gene.col='Kinase.Gene',
 }
 
 
-doPlots=FALSE
+doPlots=TRUE
 if(doPlots){
 
   plotKinDat(kindat,prefix='giltTimeCourse',vars=c('sample','Treatment','Ligand','time'))
@@ -203,7 +233,10 @@ if(doPlots){
                                                       filter(summary,Condition=='Gilteritinib_FGF2_30')$sample),
                       thirty_vs_zero_flt3=limmaTwoFactorDEAnalysis(protMat,
                                                            filter(summary,Condition%in%c('none_FLT3_0'))$sample,
-                                                           filter(summary,Condition%in%c('Gilteritinib_FLT3_30'))$sample))
+                                                           filter(summary,Condition%in%c('Gilteritinib_FLT3_30'))$sample),
+                      thirty_vs_zero_combined=limmaTwoFactorDEAnalysis(protMat,
+                                                                       filter(summary,Condition%in%c('none_FLT3_0','none_FGF2_0'))$sample,
+                                                                       filter(summary,Condition%in%c('Gilteritinib_FLT3_30','Gilteritinib_FGF2_30'))$sample))
    earlyTimePhos<-list(thirty_vs_zero_none=limmaTwoFactorDEAnalysis(phosMat,
                                                                     filter(summary,Condition=='none_None_0')$sample,
                                                                     filter(summary,Condition=='Gilteritinib_None_30')$sample),
@@ -212,17 +245,78 @@ if(doPlots){
                                                                    filter(summary,Condition=='Gilteritinib_FGF2_30')$sample),
                        thirty_vs_zero_flt3=limmaTwoFactorDEAnalysis(phosMat,
                                                                     filter(summary,Condition%in%c('none_FLT3_0'))$sample,
-                                                                    filter(summary,Condition%in%c('Gilteritinib_FLT3_30'))$sample))
+                                                                    filter(summary,Condition%in%c('Gilteritinib_FLT3_30'))$sample),
+                       thirty_vs_zero_combined=limmaTwoFactorDEAnalysis(phosMat,
+                                                                       filter(summary,Condition%in%c('none_FLT3_0','none_FGF2_0'))$sample,
+                                                                       filter(summary,Condition%in%c('Gilteritinib_FLT3_30','Gilteritinib_FGF2_30'))$sample))
+
+   lateTimePhos<-list(threeHr_vs_zero_none=limmaTwoFactorDEAnalysis(phosMat,
+                                                                   filter(summary,Condition=='none_None_0')$sample,
+                                                                   filter(summary,Condition=='Gilteritinib_None_180')$sample),
+                      threeHr_vs_zero_fgf2=limmaTwoFactorDEAnalysis(phosMat,
+                                                                  filter(summary,Condition=='none_FGF2_0')$sample,
+                                                                  filter(summary,Condition=='Gilteritinib_FGF2_180')$sample),
+                      threeHr_vs_zero_flt3=limmaTwoFactorDEAnalysis(phosMat,
+                                                                   filter(summary,Condition%in%c('none_FLT3_0'))$sample,
+                                                                   filter(summary,Condition%in%c('Gilteritinib_FLT3_180'))$sample),
+                      threeHr_vs_zero_combined=limmaTwoFactorDEAnalysis(phosMat,
+                                                                       filter(summary,Condition%in%c('none_FLT3_0','none_FGF2_0'))$sample,
+                                                                       filter(summary,Condition%in%c('Gilteritinib_FLT3_180','Gilteritinib_FGF2_180'))$sample))
    
+   
+      earlyLatePhos<-list(threeHr_vs_thirty_none=limmaTwoFactorDEAnalysis(phosMat,
+                                                                    filter(summary,Condition=='Gilteritinib_None_30')$sample,
+                                                                    filter(summary,Condition=='Gilteritinib_None_180')$sample),
+                       threeHr_vs_thirty_fgf2=limmaTwoFactorDEAnalysis(phosMat,
+                                                                   filter(summary,Condition=='Gilteritinib_FGF2_30')$sample,
+                                                                   filter(summary,Condition=='Gilteritinib_FGF2_180')$sample),
+                       threeHr_vs_thirty_flt3=limmaTwoFactorDEAnalysis(phosMat,
+                                                                    filter(summary,Condition%in%c('Gilteritinib_FLT3_30'))$sample,
+                                                                    filter(summary,Condition%in%c('Gilteritinib_FLT3_180'))$sample),
+                                                 threeHr_vs_thirty_combined=limmaTwoFactorDEAnalysis(phosMat,
+                                                                       filter(summary,Condition%in%c('Gilteritinib_FLT3_30','Gilteritinib_FGF2_30'))$sample,
+                                                                       filter(summary,Condition%in%c('Gilteritinib_FLT3_180','Gilteritinib_FGF2_180'))$sample))
+
+      earlyLateProt<-list(threeHr_vs_thirty_none=limmaTwoFactorDEAnalysis(protMat,
+                                                                          filter(summary,Condition=='Gilteritinib_None_30')$sample,
+                                                                          filter(summary,Condition=='Gilteritinib_None_180')$sample),
+                          threeHr_vs_thirty_fgf2=limmaTwoFactorDEAnalysis(protMat,
+                                                                          filter(summary,Condition=='Gilteritinib_FGF2_30')$sample,
+                                                                          filter(summary,Condition=='Gilteritinib_FGF2_180')$sample),
+                          threeHr_vs_thirty_flt3=limmaTwoFactorDEAnalysis(protMat,
+                                                                          filter(summary,Condition%in%c('Gilteritinib_FLT3_30'))$sample,
+                                                                          filter(summary,Condition%in%c('Gilteritinib_FLT3_180'))$sample),
+                          threeHr_vs_thirty_combined=limmaTwoFactorDEAnalysis(protMat,
+                                                                       filter(summary,Condition%in%c('Gilteritinib_FLT3_30','Gilteritinib_FGF2_30'))$sample,
+                                                                       filter(summary,Condition%in%c('Gilteritinib_FLT3_180','Gilteritinib_FGF2_180'))$sample))
+
+      
 
 p1<-plotConditionsInFlow(earlyTimeProt,title='30 min results',0.05)
 ggsave("thirtyMinProt.png",width=11,height=6)
-doAllGOplots(earlyTimeProt)
+#gp<-doAllGOplots(earlyTimeProt)
 
 
 p3<-plotConditionsInFlow(earlyTimePhos,title='30 min results',0.05)
 ggsave('thirtyMinPhos.png',p3,width=11,height=6)
 ph3<-doAllKSEAplots(earlyTimePhos)
+plotKSEAinHeatmap(kindat,ph3,clinvars)
+
+p2<-plotConditionsInFlow(earlyLateProt,title='180 min results',0.05)
+ggsave("lateVsthirtyMinProt.png",width=11,height=6)
+#gp<-doAllGOplots(earlyTimeProt)
+
+
+p4<-plotConditionsInFlow(earlyLatePhos,title='180 min results',0.05)
+ggsave('lateVsthirtyMinPhos.png',p4,width=11,height=6)
+ph4<-doAllKSEAplots(earlyLatePhos)
+plotKSEAinHeatmap(kindat,ph4,clinvars)
+
+p5<-plotConditionsInFlow(lateTimePhos,title='180 min vs 0',0.05)
+ggsave('lateVsZeroPhos.png',p5)
+ph5<-doAllKSEAplots(lateTimePhos)
+plotKSEAinHeatmap(kindat,ph5,clinvars)
+
 #nets<-ph3%>%mutate(Condition=stringr::str_c(Condition,'_phos'))%>%
 #xs  runNetworksFromDF()
 
@@ -239,10 +333,10 @@ ph3<-doAllKSEAplots(earlyTimePhos)
 ##plot single kinase/substrate expression of mapk3, mapk1, and mapk8
 p5<-kindat%>%
   left_join(dplyr::rename(summary,Sample='sample'))%>%
-  subset(Kinase%in%c('NRAS','AURKB'))%>%
-  ggplot(aes(x=as.factor(ligand),y=meanLFC,fill=treatment))+
-  geom_boxplot()+
-  facet_grid(~time+Kinase)+scale_fill_viridis_d()+
+  subset(Kinase%in%c('CDC7','AURKB'))%>%
+  ggplot(aes(x=time,y=meanLFC,color=Treatment))+
+  geom_jitter()+
+  facet_grid(~Ligand+Kinase)+scale_color_viridis_d()+
   ggtitle("Estimated Kinase Activity")
 ggsave('estimatedAurbActivityGiltTime.png',p5,width=10)
 }
