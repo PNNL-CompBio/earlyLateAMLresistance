@@ -1,6 +1,8 @@
 ##process cytokine data
 library(amlresistancenetworks)
 library(dplyr)
+library(nationalparkcolors)
+pal<-park_palette('Saguaro',5)
 
 ##first run gilteritinib data
 protData<-querySynapseTable('syn24189419')%>%
@@ -209,7 +211,12 @@ runNetworksFromDF<-function(data,gene.col='Kinase.Gene',
 }
 
 
-doPlots=TRUE
+  clinvars = c("sample","time","Treatment","Ligand")
+  ##what are we doing again?
+  summary<-protData%>%dplyr::select(clinvars)%>%distinct()%>%rowwise()%>%
+    mutate(Condition=stringr::str_c(Treatment,Ligand,time,sep='_'))
+  print(summary)
+  doPlots=FALSE
 if(doPlots){
 
   plotKinDat(kindat,prefix='giltTimeCourse',vars=c('sample','Treatment','Ligand','time'))
@@ -219,11 +226,7 @@ if(doPlots){
                      nrow=2)
   ggsave('pcaOfGiltTimeCourse.png')
   
-  clinvars = c("sample","time","Treatment","Ligand")
-  ##what are we doing again?
-  summary<-protData%>%dplyr::select(clinvars)%>%distinct()%>%rowwise()%>%
-    mutate(Condition=stringr::str_c(Treatment,Ligand,time,sep='_'))
-  print(summary)
+
   
    earlyTimeProt<-list(thirty_vs_zero_none=limmaTwoFactorDEAnalysis(protMat,
                                                         filter(summary,Condition=='none_None_0')$sample,
@@ -326,17 +329,37 @@ plotKSEAinHeatmap(kindat,ph5,clinvars)
 #  dplyr::rename(p.value='adj.P.Val')%>%
 #  runNetworksFromDF(.,gene.col='featureID',weight.col='logFC',condition.col='Condition',extra.col=c('AveExpr','t','B','P.Value'),signif=0.01)
 
-
 #mcp1Resistnetworks<-runNetworksFromDF(ph3)
-
 
 ##plot single kinase/substrate expression of mapk3, mapk1, and mapk8
 p5<-kindat%>%
   left_join(dplyr::rename(summary,Sample='sample'))%>%
-  subset(Kinase%in%c('CDC7','AURKB'))%>%
-  ggplot(aes(x=time,y=meanLFC,color=Treatment))+
+  subset(Kinase%in%c('CDC7','AURKB','MTOR'))%>%
+  ggplot(aes(x=time,y=meanLFC,color=Treatment,shape=Kinase))+
   geom_jitter()+
-  facet_grid(~Ligand+Kinase)+scale_color_viridis_d()+
+  facet_grid(~Ligand)+scale_color_viridis_d()+
   ggtitle("Estimated Kinase Activity")
 ggsave('estimatedAurbActivityGiltTime.png',p5,width=10)
+
+t0<-summary%>%
+    subset(time==0)%>%mutate(t2='DMSO')%>%
+  select(-Treatment)%>%rename(Treatment='t2')
+t1<-summary%>%
+  subset(time==0)%>%mutate(t2='Gilteritinib')%>%
+  select(-Treatment)%>%rename(Treatment='t2')
+
+newsumm<-summary%>%
+  subset(time!=0)%>%rbind(t0)%>%rbind(t1)
+
+p6<-kindat%>%
+    left_join(dplyr::rename(newsumm,Sample='sample'))%>%
+    subset(Kinase%in%c('CDC7','AURKB','MTOR'))%>% 
+    group_by(Ligand,time,Kinase,Treatment)%>%
+    summarize(mlfc=mean(meanLFC),sd=sd(meanLFC))%>%
+    ggplot(aes(x=time,y=mlfc,color=Kinase,shape=Treatment,linetype=Treatment))+
+  geom_line(aes(size=.25))+geom_point(aes(size=.4))+scale_color_manual(values=pal)+
+  facet_grid(~Ligand)+
+   geom_errorbar(aes(ymin=mlfc-sd, ymax=mlfc+sd))
+ggsave('timeCourseKinaseActivity.pdf',p6,width=12)
+
 }
