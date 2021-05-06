@@ -1,0 +1,157 @@
+---
+title: "Creation of study design tables for Ex17"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r libraries, warning=F, message=F}
+library(PlexedPiper)
+library(dplyr)
+path_to_data_folder <- "data/"
+```
+
+# Loading data
+
+## Job records from DMS
+
+```{r job_records}
+job_records <- get_job_records_by_dataset_package(3813)
+
+head(job_records)
+```
+
+## Study metadata
+```{r metadata}
+library(readxl)
+
+metadata <- read_xlsx("./../Ex17_MetadataTable.xlsx")
+head(metadata)
+```
+
+# Making study design tables
+
+## Fractions
+
+The fractions table is based off DMS job records.
+
+
+```{r fractions}
+library(stringr)
+
+fractions <- job_records %>%
+  select(Dataset) %>%
+  distinct() %>%
+  mutate(PlexID = str_extract(Dataset, "Plex\\d"))
+
+head(fractions)
+```
+
+# Samples
+
+The samples table is based on the metadata for the study.
+
+```{r samples}
+samples <- metadata %>%
+  dplyr::select(`PNNL ID`,
+                Plex,
+                Channel) %>%
+  dplyr::rename(PlexID = Plex,
+                ReporterName = Channel,
+                ReporterAlias = `PNNL ID`) %>%
+  dplyr::mutate(PlexID = paste("Plex", PlexID, sep=""),
+               QuantBlock = 1,
+               ReporterName = if_else(ReporterName == "131 C",
+                                      "131C",
+                                      ReporterName),
+               ReporterAlias = sub("PTRC_Ex17_", "", ReporterAlias)) %>%
+  dplyr::mutate(MeasurementName = if_else(ReporterAlias == "Ref",
+                                          NA_character_ ,
+                                          ReporterAlias)) %>%
+  dplyr::select(PlexID,
+                QuantBlock,
+                ReporterName,
+                ReporterAlias,
+                MeasurementName)
+head(samples)
+```
+
+## References
+
+The references table is merely a subset of the samples table.
+
+```{r references}
+references <- samples %>%
+  select(PlexID, QuantBlock, Reference=ReporterAlias) %>%
+  filter(Reference == "Ref")
+
+head(references)
+```
+
+# Save to file
+
+```{r save}
+write.table(fractions, "./study_design/fractions.txt",
+            quote=F, sep="\t", row.names=F)
+write.table(samples, "./study_design/samples.txt",
+            quote=F, sep="\t", row.names=F)
+write.table(references, "./study_design/references.txt",
+            quote=F, sep="\t", row.names=F)
+```
+
+```{r}
+meta.data <- read_xlsx("./../Ex17_MetadataTable.xlsx")
+names(meta.data) <- make.names(names(meta.data))
+meta.data <- meta.data %>%
+  select(Sample.ID,
+         Tx.Status,
+         BeatAML.Patient.ID,
+         PNNL.ID,
+         Loading.Mass) %>%
+  mutate(PNNL.ID = sub("PTRC_Ex17_", "", PNNL.ID))
+
+samples <- filter(samples, !is.na(MeasurementName))
+p <- left_join(samples,
+               meta.data,
+               by=c("MeasurementName"="PNNL.ID"))
+p <- as.data.frame(p)
+rownames(p) <- p$MeasurementName
+
+
+
+p <- p %>%
+  mutate(Sample.Type = if_else(grepl("Healthy", BeatAML.Patient.ID),
+                               "Healthy Donor Stroma",
+                               if_else(grepl("Cell line", BeatAML.Patient.ID),
+                                       "Cell line", "Patient sample")))
+p <- p %>%
+  mutate(Cell.Line = if_else(Sample.Type == "Cell line",
+                             str_extract(Sample.ID, "HS-\\d+"),
+                             NA_character_)) %>%
+  mutate(Treatment.Group = if_else(Sample.Type == "Cell line",
+                                   NA_character_,
+                                   if_else(Sample.Type == "Healthy Donor Stroma",
+                                           "Healthy Donor Stroma",
+                                           if_else(Tx.Status %in% c("P2 Cycle 1 Day 1", "P2 Pre-Study"),
+                                                   "Early timepoint",
+                                                   "Other"))))
+```
+
+```{r}
+p_patients <- p %>% filter(Sample.Type != "Cell line") %>%
+  select(-Cell.Line) %>%
+  mutate(Phase = str_extract(Tx.Status, "P\\S+\\s"),
+         Cycle = str_extract(Tx.Status, "Cycle \\d"),
+         Day = str_extract(Tx.Status, "Day \\d+"))
+
+p_cell_lines <- p %>% filter(Sample.Type == "Cell line") %>% 
+  select(-Tx.Status, -BeatAML.Patient.ID, -Loading.Mass, -Sample.Type, -Treatment.Group) %>% 
+  mutate(RGroup = str_extract(Sample.ID, "R\\d"))
+
+save(p_patients, file=file.path(path_to_data_folder, "patientPhenoData.RData"))
+save(p_cell_lines, file=file.path(path_to_data_folder, "cellLinePhenoData.RData"))
+```
+
+```{r}
+save(p, file="data/phenoData.RData")
+```

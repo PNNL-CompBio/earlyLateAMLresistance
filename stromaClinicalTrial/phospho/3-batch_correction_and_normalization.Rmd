@@ -1,0 +1,113 @@
+---
+title: "Batch correction and normalization"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+# Load methods
+
+```{r}
+library(devtools)
+source_url("https://raw.githubusercontent.com/mdnestor/beatAMLproteomics/main/dataProcessing/proteomicsNormalizationMethods.R")
+```
+
+```{r}
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(MSnbase)
+```
+
+```{r}
+# Uncorrected phospho site ID, with global protein correction
+load("../global/data/msnset_global_gene_original.RData")
+m_global <- m
+load("data/msnset_phospho_siteID_original.RData")
+
+m <- normalizeByGlobalSampleMedians(m, m_global)
+
+m <- normalizeByMedpolish(m)
+save(m, file="data/msnset_phospho_siteID_uncorrected.RData")
+```
+
+```{r}
+# Uncorrected phospho site ID, without global protein correction
+load("data/msnset_phospho_siteID_original.RData")
+m <- normalizeByMedpolish(m)
+save(m, file="data/msnset_phospho_siteID_uncorrected_phospho_coefficients.RData")
+```
+
+```{r}
+# Corrected phospho site
+load("../global/data/msnset_global_gene_original.RData")
+m_global <- m
+load("data/msnset_phospho_siteID_original.RData")
+
+# Normalization
+m <- m %>%
+  normalizeByGlobalSampleMedians(m_global) %>%
+  filterByProportionMissingValues(least_proportion_threshold=0.5) %>%
+  filterByMissingPerBatch("PlexID", least_count_threshold=1L)
+  
+# Batch correction
+removed_covariates <- c("PlexID", "Loading.Mass")
+retained_covariates <- c("Sample.Type")
+
+m <- correct_batch_effect_empiricalBayesLM(m,
+                                           removed_covariates,
+                                           retained_covariates)
+
+m <- normalizeByMedpolish(m)
+
+save(m, file="data/msnset_phospho_siteID_corrected.RData")
+```
+
+```{r}
+# Uncorrected phospho site ID, with global protein correction
+load("../global/data/msnset_global_peptide_original.RData")
+m_global <- m
+load("data/msnset_phospho_peptide_original.RData")
+
+m <- normalizeByGlobalSampleMedians(m, m_global)
+
+m <- normalizeByMedpolish(m)
+save(m, file="data/msnset_phospho_peptide_uncorrected.RData")
+```
+
+```{r}
+# Uncorrected phospho peptide, without global protein correction
+load("data/msnset_phospho_peptide_original.RData")
+m <- normalizeByMedpolish(m)
+save(m, file="data/msnset_phospho_peptide_uncorrected_phospho_coefficients.RData")
+```
+
+```{r}
+# Corrected phospho site
+load("../global/data/msnset_global_peptide_original.RData")
+m_global <- m
+load("data/msnset_phospho_peptide_original.RData")
+
+# Normalization
+m <- m %>%
+  normalizeByGlobalSampleMedians(m_global) %>%
+  filterByProportionMissingValues(least_proportion_threshold=0.5) %>%
+  filterByMissingPerBatch("PlexID", least_count_threshold=1L)
+  
+# Batch correction
+removed_covariates <- c("PlexID", "Loading.Mass")
+retained_covariates <- c("Sample.Type")
+
+m <- correct_batch_effect_empiricalBayesLM(m,
+                                           removed_covariates,
+                                           retained_covariates)
+
+m <- normalizeByMedpolish(m)
+
+save(m, file="data/msnset_phospho_peptide_corrected.RData")
+```
+
+
+
+

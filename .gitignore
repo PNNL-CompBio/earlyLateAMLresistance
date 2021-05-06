@@ -6,6 +6,12 @@
 .csv
 .pdf
 
+# Data folders
+stromaClinicalTrial/data
+stromaClinicalTrial/global/data
+stromaClinicalTrial/phospho/data
+stromaClinicalTrial/reports
+
 # Session Data files
 .RData
 

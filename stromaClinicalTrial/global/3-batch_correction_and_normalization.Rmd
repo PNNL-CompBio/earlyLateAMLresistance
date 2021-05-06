@@ -1,0 +1,86 @@
+---
+title: "Batch correction and normalization"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+# Load methods
+
+```{r}
+library(devtools)
+source_url("https://raw.githubusercontent.com/mdnestor/beatAMLproteomics/main/dataProcessing/proteomicsNormalizationMethods.R")
+```
+
+```{r}
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(MSnbase)
+```
+
+
+```{r}
+# Uncorrected global gene
+load("data/msnset_global_gene_original.RData")
+m <- normalizeByMedpolish(m)
+save(m, file="data/msnset_global_gene_uncorrected.RData")
+```
+
+```{r}
+# Corrected global gene
+load("data/msnset_global_gene_original.RData")
+
+# Normalization
+m <- m %>%
+  normalizeBySampleMedians() %>%
+  filterByProportionMissingValues(least_proportion_threshold=0.5) %>%
+  filterByMissingPerBatch("PlexID", least_count_threshold=1L)
+  
+# Batch correction
+removed_covariates <- c("PlexID", "Loading.Mass")
+retained_covariates <- c("Sample.Type")
+
+m <- correct_batch_effect_empiricalBayesLM(m,
+                                           removed_covariates,
+                                           retained_covariates)
+
+m <- normalizeByMedpolish(m)
+
+save(m, file="data/msnset_global_gene_corrected.RData")
+```
+
+```{r}
+# Uncorrected global peptide
+load("data/msnset_global_peptide_original.RData")
+m <- normalizeByMedpolish(m)
+save(m, file="data/msnset_global_peptide_uncorrected.RData")
+```
+
+```{r}
+# Corrected global peptide
+load("data/msnset_global_peptide_original.RData")
+
+# Normalization
+m <- m %>%
+  normalizeBySampleMedians() %>%
+  filterByProportionMissingValues(least_proportion_threshold=0.5) %>%
+  filterByMissingPerBatch("PlexID", least_count_threshold=1L)
+  
+# Batch correction
+removed_covariates <- c("PlexID", "Loading.Mass")
+retained_covariates <- c("Sample.Type")
+
+m <- correct_batch_effect_empiricalBayesLM(m,
+                                           removed_covariates,
+                                           retained_covariates)
+
+m <- normalizeByMedpolish(m)
+
+save(m, file="data/msnset_global_peptide_corrected.RData")
+```
+
+
+
+
