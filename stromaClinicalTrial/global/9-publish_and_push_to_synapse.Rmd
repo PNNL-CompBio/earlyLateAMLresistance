@@ -1,0 +1,44 @@
+---
+title: "Publish and push to Synapse"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+# Export crosstabs to txt file and push to synapse
+
+```{r}
+load("data/phenoData.RData")
+
+write.table(p, file="data/PTRC_Ex17_metadata.txt",
+            quote=F, sep="\t")
+```
+
+```{r}
+library(MSnbase)
+
+load("data/msnset_global_gene_uncorrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_gene_uncorrected.txt",
+            quote=F, sep="\t")
+
+load("data/msnset_global_gene_corrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_gene_batchCorrected.txt",
+            quote=F, sep="\t")
+
+
+load("data/msnset_global_peptide_uncorrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_peptide_uncorrected.txt",
+            quote=F, sep="\t")
+
+load("data/msnset_global_peptide_corrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_peptide_batchCorrected.txt",
+            quote=F, sep="\t")
+```
+
+
+

@@ -1,0 +1,50 @@
+---
+title: "Publish and push to Synapse"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+# Export crosstabs to txt file and push to synapse
+
+```{r}
+library(MSnbase)
+
+load("data/msnset_phospho_siteID_uncorrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_SiteID_uncorrected.txt",
+            quote=F, sep="\t")
+
+load("data/msnset_phospho_siteID_corrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_SiteID_batchCorrected.txt",
+            quote=F, sep="\t")
+
+load("data/msnset_phospho_siteID_uncorrected_phospho_coefficients.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_SiteID_uncorrected_phosphoCoeffs.txt",
+            quote=F, sep="\t")
+
+
+
+#
+
+load("data/msnset_phospho_peptide_uncorrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_peptide_uncorrected.txt",
+            quote=F, sep="\t")
+
+load("data/msnset_phospho_peptide_corrected.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_peptide_batchCorrected.txt",
+            quote=F, sep="\t")
+
+load("data/msnset_phospho_peptide_uncorrected_phospho_coefficients.RData")
+exprs(m) <- signif(exprs(m), 3)
+write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_peptide_uncorrected_phosphoCoeffs.txt",
+            quote=F, sep="\t")
+```
+
+
+

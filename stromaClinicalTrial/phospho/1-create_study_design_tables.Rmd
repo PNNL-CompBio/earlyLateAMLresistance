@@ -1,0 +1,42 @@
+---
+title: "Creation of study design tables"
+output: html_notebook
+---
+
+```{r}
+library(PlexedPiper)
+library(dplyr)
+library(stringr)
+data_package_num <- 3817
+```
+
+```{r}
+job_records <- get_job_records_by_dataset_package(data_package_num)
+
+fractions <- job_records %>%
+  select(Dataset) %>%
+  distinct()
+
+head(fractions)
+```
+
+```{r}
+fractions <- fractions %>%
+  mutate(PlexID = str_extract(Dataset, "P\\d"))
+head(fractions)
+```
+
+```{r}
+study_design <- get_study_design_by_dataset_package(3813)
+samples <- study_design$samples
+references <- study_design$references
+```
+
+```{r}
+write.table(fractions, "study_design/fractions.txt",
+            quote=F, sep="\t", row.names=F)
+write.table(samples, "study_design/samples.txt",
+            quote=F, sep="\t", row.names=F)
+write.table(references, "study_design/references.txt",
+            quote=F, sep="\t", row.names=F)
+```

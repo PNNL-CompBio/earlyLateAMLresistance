@@ -1,0 +1,387 @@
+---
+title: "PTRC Ex17 Phospho report"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r}
+knitr::opts_chunk$set(warning=F, message=F, cache=F)
+```
+
+# Summary statistics
+
+```{r}
+library(MSnbase)
+
+x <- matrix(0, nrow=2, ncol=2)
+rownames(x) <- c("Phospho site", "Phospho peptide")
+colnames(x) <- c("Before correction", "After correction")
+
+load("data/msnset_phospho_siteID.RData")
+x[1,1] <- nrow(m)
+load("data/msnset_phospho_siteID_corrected.RData")
+x[1,2] <- nrow(m)
+load("data/msnset_phospho_peptide.RData")
+x[2,1] <- nrow(m)
+load("data/msnset_phospho_peptide_corrected.RData")
+x[2,2] <- nrow(m)
+
+print(x)
+```
+
+```{r, message=F, warning=F}
+library(vp.misc)
+library(sva)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library("pheatmap")
+library(readxl)
+library(dplyr)
+library(MSnbase)
+library(stringr)
+library(tidyr)
+library(limma)
+```
+
+```{r}
+load("data/msnset_phospho_siteID.RData")
+
+p <- pData(m)
+table(p$Sample.Type)
+```
+
+# Principal component analysis
+
+```{r}
+knitr::opts_chunk$set(fig.width = 8,fig.height = 8)
+```
+
+```{r}
+plot_pca_v5 <- function (eset, phenotype = NULL, label = NULL, point_size = 5, 
+  show.ellispe = TRUE, show.NA = TRUE, legend.title.width = 20, 
+  ...) 
+{
+  colorBy <- pData(eset)[[phenotype]]
+
+  stopifnot(sum(complete.cases(exprs(eset))) > 1)
+  eset <- eset[complete.cases(exprs(eset)), ]
+  z <- t(exprs(eset))
+  z <- sweep(z, 1, rowMeans(z), FUN = "-")
+  z <- sweep(z, 1, apply(z, 1, sd), FUN = "/")
+  pca1 <- prcomp(z, scale. = F)
+  scores <- as.data.frame(pca1$x)
+  exp_var <- 100 * summary(pca1)$importance[2, ][c(1, 2)]
+  axes <- paste0("PC", c(1, 2))
+  axes <- paste0(axes, " (", round(exp_var, 2), "%)")
+  ggdata <- data.frame(scores[, c(1, 2)], colorBy)
+  
+  p <- ggplot(ggdata) +
+    geom_point(aes(x = PC1, y = PC2, color = colorBy), 
+               size = point_size,
+               shape = 20,
+               show.legend = F) + 
+    coord_fixed() +
+    xlab(axes[1]) +
+    ylab(axes[2]) +
+    theme_gray()
+  
+  if (!is.null(label)) {
+    custom_args <- list(mapping = aes(x = PC1, y = PC2,
+      fill = colorBy,
+      label = pData(eset)[[label]]),
+      fontface = "bold",
+      color = "white", box.padding = 0.25, point.padding = 0.25,
+      segment.color = "grey50",
+      label.size = 0.01,
+      segment.alpha = 0.5,
+      size = 2.5)
+    user_args <- list(...)
+    custom_args[names(user_args)] <- user_args
+    p <- p + do.call(geom_label_repel, custom_args)
+  }
+  
+  phenotype_str <- str_wrap(phenotype, legend.title.width)
+  
+  if (show.ellispe) {
+    p <- p + stat_ellipse(aes(x = PC1, y = PC2, fill = colorBy), 
+      geom = "polygon", type = "norm", level = 0.5, alpha = 0.1, 
+      show.legend = TRUE) + guides(color = guide_legend(phenotype_str), 
+      fill = guide_legend(phenotype_str))
+  } else {
+    if (is.numeric(colorBy)) {
+      p <- p + guides(color = guide_colorbar(phenotype_str))
+    }
+    else if (!identical(colorBy, "")) {
+      p <- p + guides(color = guide_legend(phenotype_str))
+    }
+  }
+  return(p)
+}
+
+```
+
+
+## Uncorrected data
+```{r, fig.height=8, fig.width=8}
+load("data/msnset_phospho_siteID.RData")
+plot_pca_v5(m, "Sample.Type", label="MeasurementName") +  ggtitle("PCA by Sample Type, uncorrected data (patient + cell lines)")
+
+m <- m[,m$Sample.Type!="Cell line"]
+plot_pca_v5(m, "PlexID", label="MeasurementName") + ggtitle("PCA by plex ID, uncorrected data (patient samples only)")
+
+load("data/msnset_phospho_siteID.RData")
+m <- m[,m$Sample.Type=="Cell line"]
+plot_pca_v5(m, "PlexID", label="MeasurementName", show.ellispe=F) + ggtitle("PCA by plex ID, uncorrected data (cell lines only)")
+```
+
+## Batch corrected data
+```{r}
+load("data/msnset_phospho_siteID_corrected.RData")
+plot_pca_v5(m, "Sample.Type", label="MeasurementName") +
+  ggtitle("PCA by Sample Type, corrected data (patient + cell lines)")
+
+m <- m[,m$Sample.Type!="Cell line"]
+plot_pca_v5(m, "Sample.Type", label="MeasurementName") + ggtitle("PCA by sample type, corrected data (patient samples only)")
+
+plot_pca_v5(m, "Treatment.Group", label="MeasurementName") + ggtitle("PCA by treatment group, corrected data (patient samples only)")
+
+load("data/msnset_phospho_siteID_corrected.RData")
+m <- m[,m$Sample.Type=="Cell line"]
+plot_pca_v5(m, "Cell.Line", show.ellispe=F, label="MeasurementName") + ggtitle("PCA by cell line, corrected data (cell lines only)")
+```
+
+# Linear modeling
+
+```{r}
+knitr::opts_chunk$set(fig.width = 6,fig.height = 6)
+```
+
+```{r}
+
+limma_gen_v2 <- function (eset, model.str, coef.str, ...) 
+{
+  model.formula <- eval(parse(text = model.str), envir = pData(eset))
+  design <- model.matrix(model.formula)
+  idx <- grepl(coef.str, colnames(design))
+  coef.str <- colnames(design)[idx]
+  eset <- eset[, as.numeric(rownames(design))]
+  fit <- lmFit(exprs(eset), design, ...)
+  fit.smooth <- eBayes(fit)
+  sig <- topTable(fit.smooth, number = nrow(eset), sort.by = "none",
+    coef = coef.str)
+  #return(fi)
+  return(sig)
+}
+
+plot_limmas <- function(limma1, limma2, covariate) {
+
+
+  df <- limma1 %>% as.data.frame() %>% rownames_to_column("Gene") %>%
+    select(Gene, P.Value) %>% mutate(group="Uncorrected")
+  
+  df <- limma2 %>% as.data.frame() %>% rownames_to_column("Gene") %>%
+    select(Gene, P.Value) %>% mutate(group="Corrected") %>%
+    rbind(., df)
+  
+  df$group <- factor(df$group, levels=c("Uncorrected", "Corrected"))
+  
+  plt <- ggplot(df,aes(x=P.Value)) +
+    geom_histogram(aes(y=..density..), breaks=seq(0,1,0.05)) +
+    # geom_density() +
+    facet_grid(~group) +
+    theme_bw()
+}
+
+plot_limma <- function(limma, covariate) {
+
+
+  df <- limma %>% as.data.frame() %>% rownames_to_column("Gene") %>%
+    select(Gene, P.Value)
+  
+  
+  plt <- ggplot(df,aes(x=P.Value)) +
+    geom_histogram(aes(y=..density..), breaks=seq(0,1,0.05)) +
+    theme_bw() + ggtitle(paste(covariate, "as covariate"))
+}
+
+```
+
+## Testing for technical covariates
+
+```{r}
+model.str = "~PlexID+Loading.Mass+Sample.Type"
+covariate="PlexID"
+
+load("data/msnset_phospho_siteID_corrected.RData")
+m.corrected <- m
+load("data/msnset_phospho_siteID.RData")
+
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for plex ID (full data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res <- data.frame(PlexID = c(n_sig_uncorrected, n_sig_corrected))
+rownames(res) <- c("Uncorrected data", "Corrected data")
+
+covariate="Loading.Mass"
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for loading mass (full data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res$LoadingMass <-c(n_sig_uncorrected, n_sig_corrected)
+
+covariate="Sample.Type"
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for sample type (full data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res$SampleType <-c(n_sig_uncorrected, n_sig_corrected)
+```
+
+Number of significantly differentially express proteins by each covariate:
+```{r}
+knitr::kable(res)
+```
+
+
+
+## Testing patient data for treatment effects
+
+```{r}
+load("data/msnset_phospho_siteID_corrected.RData")
+m.corrected <- m[,m$Sample.Type!="Cell line"]
+load("data/msnset_phospho_siteID.RData")
+m <- m[,m$Sample.Type!="Cell line"]
+
+model.str = "~PlexID+Loading.Mass+Sample.Type"
+covariate="PlexID"
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for plex ID (patient data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res <- data.frame(PlexID = c(n_sig_uncorrected, n_sig_corrected))
+rownames(res) <- c("Uncorrected patient  data", "Corrected patient data")
+
+covariate="Loading.Mass"
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for loading mass (patient data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res$LoadingMass <-c(n_sig_uncorrected, n_sig_corrected)
+
+covariate="Sample.Type"
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for treatment group (patient data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res$TreatmentGroup <-c(n_sig_uncorrected, n_sig_corrected)
+
+
+```
+
+Number of significantly differentially express proteins by each covariate:
+```{r}
+knitr::kable(res)
+```
+
+## Testing cell line data for treatment effects
+
+```{r}
+load("data/msnset_phospho_siteID_corrected.RData")
+m.corrected <- m[,m$Sample.Type=="Cell line"]
+load("data/msnset_phospho_siteID.RData")
+m <- m[,m$Sample.Type=="Cell line"]
+
+model.str = "~PlexID+Cell.Line"
+covariate="PlexID"
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for plex ID (cell line data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res <- data.frame(PlexID = c(n_sig_uncorrected, n_sig_corrected))
+rownames(res) <- c("Uncorrected cell line data", "Corrected cell line data")
+
+
+covariate="Cell.Line"
+limma1 <- limma_gen_v2(m, model.str, covariate)
+limma2 <- limma_gen_v2(m.corrected, model.str, covariate)
+    
+plot_limmas(limma1, limma2, covariate) + ggtitle("Limma test p-value histogram for treatment group (cell line data)")
+
+n_sig_uncorrected <- sum(limma1$adj.P.Val<0.05, na.rm=T)
+n_sig_corrected <- sum(limma2$adj.P.Val<0.05, na.rm=T)
+
+res$CellLine <-c(n_sig_uncorrected, n_sig_corrected)
+
+
+```
+
+Number of significantly differentially express proteins by each covariate:
+```{r}
+knitr::kable(res)
+```
+
+# Heatmaps
+
+```{r,fig.height=13, fig.width=4}
+# 
+# sampAts <- pData(m.corrected.cell)[,c("PlexID", "Cell.Line")]
+# 
+# x <- exprs(m.corrected.cell)
+# x <- x[which(apply(x, 1, function(x) sum(is.na(x)))<1),]
+# 
+# vars=names(sort(apply(x,1,var,na.rm=T),decreasing=T)[1:100])
+# 
+# pheatmap(x[vars,],
+#            cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
+#            clustering_distance_rows = 'correlation',
+#            #annotation_row = kinAts
+#            annotation_col=sampAts,
+#          height=20,width=8)
+# 
+# 
+# sampAts <- pData(m.corrected.patient)[,c("Sample.Type", "Treatment.Group")]
+# 
+# x <- exprs(m.corrected.patient)
+# x <- x[which(apply(x, 1, function(x) sum(is.na(x)))<1),]
+# 
+# vars=names(sort(apply(x,1,var,na.rm=T),decreasing=T)[1:100])
+# 
+# pheatmap(x[vars,],
+#            cellwidth = 8,cellheight=8,clustering_distance_cols = 'correlation',
+#            clustering_distance_rows = 'correlation',
+#            #annotation_row = kinAts
+#            annotation_col=sampAts,
+#          height=20,width=8)
+```
