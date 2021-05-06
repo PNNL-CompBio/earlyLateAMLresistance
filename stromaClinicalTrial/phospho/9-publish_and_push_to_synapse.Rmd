@@ -9,41 +9,62 @@ output:
 # Export crosstabs to txt file and push to synapse
 
 ```{r}
+library(amlresistancenetworks)
+library(dplyr)
+
+library(reticulate)
+syn = reticulate::import("synapseclient")
+sync = syn$login()
+```
+
+```{r}
 library(MSnbase)
 
 load("data/msnset_phospho_siteID_uncorrected.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_SiteID_uncorrected.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681597")
+```
 
+```{r}
 load("data/msnset_phospho_siteID_corrected.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_SiteID_batchCorrected.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681596")
+```
 
+```{r}
 load("data/msnset_phospho_siteID_uncorrected_phospho_coefficients.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_SiteID_uncorrected_phosphoCoeffs.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681598")
+```
 
-
-
-#
-
+```{r}
 load("data/msnset_phospho_peptide_uncorrected.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_peptide_uncorrected.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681600")
+```
 
+```{r}
 load("data/msnset_phospho_peptide_corrected.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_peptide_batchCorrected.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681599")
+```
 
+```{r}
 load("data/msnset_phospho_peptide_uncorrected_phospho_coefficients.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabPhospho_peptide_uncorrected_phosphoCoeffs.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681595")
 ```
 
 

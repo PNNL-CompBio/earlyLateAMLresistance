@@ -9,10 +9,12 @@ output:
 # Export crosstabs to txt file and push to synapse
 
 ```{r}
-load("data/phenoData.RData")
+library(amlresistancenetworks)
+library(dplyr)
 
-write.table(p, file="data/PTRC_Ex17_metadata.txt",
-            quote=F, sep="\t")
+library(reticulate)
+syn = reticulate::import("synapseclient")
+sync = syn$login()
 ```
 
 ```{r}
@@ -23,22 +25,32 @@ exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_gene_uncorrected.txt",
             quote=F, sep="\t")
 
+synTableUpdate(exprs(m), "syn25681584")
+```
+
+```{r}
 load("data/msnset_global_gene_corrected.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_gene_batchCorrected.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681591")
+```
 
-
+```{r}
 load("data/msnset_global_peptide_uncorrected.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_peptide_uncorrected.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681589")
+```
 
+```{r}
 load("data/msnset_global_peptide_corrected.RData")
 exprs(m) <- signif(exprs(m), 3)
 write.table(exprs(m), file="data/PTRC_Ex17_crosstabGlobal_peptide_batchCorrected.txt",
             quote=F, sep="\t")
+synTableUpdate(exprs(m), "syn25681586")
 ```
 
-
+# Push to synapse
 
