@@ -1,0 +1,76 @@
+---
+title: "Proteomic data processing"
+author: "Camilo Posso"
+date: "5/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(dplyr)
+library(tibble)
+```
+
+## Data formats
+
+Using the data available in the crosstabs and a second metadata file, we can create a Synapse table that is in 'long form' and has all the protein/phosphosite values together with their relevant metadata.
+
+### Issues with SSL? Try disconnecting your VPN
+
+```{r synapselogin}
+source("../../util/synapseUtil.R")
+
+syn <- synapseLogin()
+
+tables.syn <- c("Phospho peptide corrected" = "syn25681780",
+                "Phospho peptide uncorrected" = "syn25681781",
+                "Phospho peptide uncorrected phospho coefficients" = "syn25681782",
+                "Phospho siteID corrected" = "syn25681783",
+                "Phospho siteID uncorrected" = "syn25681786",
+                "Phospho siteID uncorrected phospho coefficients" = "syn25681787")
+
+metadata.syn <- "syn25681625"
+
+```
+
+
+## Merge metadata and Phospho proteomics data
+
+
+```{r pressure, echo=FALSE}
+meta.tab <- readxl::read_xlsx(syn$get(metadata.syn)$path)
+meta.tab$`PNNL ID` <- sub("^PTRC_Ex17_(.*)$","\\1",meta.tab$`PNNL ID`)
+index <- which(names(meta.tab) == "Tx Status")
+names(meta.tab)[index] <- "Description"
+
+print(head(meta.tab))
+
+tables <- list()
+
+for (i in 1:length(tables.syn)){
+  name <- names(tables.syn)[[i]]
+  crosstab.syn <- tables.syn[[i]]
+  mat <- read.csv(syn$get(crosstab.syn)$path,sep='\t',header=T)
+  names(mat) <- sub("^X(.*)$","\\1",names(mat))
+  mat <- add_column(mat, Accession = rownames(mat), .before = 1)
+  
+
+  mat <- mat%>%tidyr::pivot_longer(cols=c(2:ncol(mat)),names_to='Sample',
+                      values_to='LogRatio')
+  mat <- left_join(mat,meta.tab, by = c("Sample" ="PNNL ID")) %>% subset(!is.na(LogRatio))
+  tables[[name]] <- mat
+}
+```
+
+Now we have all the data in long form.  The last thing that needs to be done is to store them both to a synapse table. This requires knowing the synapse project.
+
+```{r store tables}
+for (name in names(tables.syn)){
+  print(name)
+  mat <- tables[[name]]
+  name <- paste("PTRC_ex17",name,sep = " ")
+  print(name)
+  synTableStore(mat,name,parentId='syn22128879')
+}
+```
+
