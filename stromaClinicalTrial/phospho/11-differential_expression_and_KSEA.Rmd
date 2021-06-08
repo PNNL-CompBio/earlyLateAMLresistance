@@ -1,0 +1,241 @@
+---
+title: "Sunil Ex17 Phospho site differential expression & KSEA"
+author: "Camilo Posso"
+date: "06/07/2021"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include=FALSE}
+library(leapr)
+library(kableExtra)
+library(amlresistancenetworks)
+library(stats)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+source("../../Util/synapseUtil.R")
+
+# corrected for loading mass and plexID, long time and subtle
+p.site.corrected <- querySynapseTable("syn25706631")
+
+phos.dat <- p.site.corrected
+phos.dat$Peptide <- sub("^.*@(.*)$", "\\1", phos.dat$Accession)
+phos.dat$site <- sub("^(.*)@.*$", "\\1", phos.dat$Accession)
+phos.dat$Gene <- sub("(.*)-.*$", "\\1", phos.dat$site)
+
+# from here we can select just the metadata of interest
+metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
+summary <- phos.dat%>%
+  select(metadata.columns)%>%
+  distinct()
+summary$Description <- as.character(summary$Description)
+
+# for exploration purposes, we create a new variable containing the type of sample,
+# as well as a boolean indicating the time group of the sample.
+summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
+                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
+summary[is.na(summary$Type), "Type"] <- "Treated"
+summary$Period <- case_when(grepl("Pre",summary$Description) | grepl("Day 1", summary$Description) ~ "Early",
+                            grepl("Day 28",summary$Description) ~ "Late")
+rownames(summary) <- summary$Sample
+
+```
+
+## Get dataset
+
+We access synapse to load the data in long form. We use data which has been corrected for both
+Loading mass effect, as well as plex effect. Below we see a metadata table for this experiment.
+
+```{r pressure, echo=FALSE}
+show <- summary %>%
+  select(-`BeatAML Patient ID`)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+Here we perform 4 comparisons. We compare the healthy group to the treated, 
+treated & early, and treated & late groups. We also compare the treated & early vs 
+treated & late groups. 
+
+```{r prepare ratios and limma, include=FALSE}
+##select the samples of interest
+healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
+  select(Sample)%>%
+  unique()
+
+treated.late <- subset(summary, Period == "Late")%>%
+  select(Sample)%>%
+  unique()
+
+treated.early <- subset(summary, Period == "Early")%>%
+  select(Sample)%>%
+  unique()
+
+treated <- subset(summary, Type == 'Treated')%>%
+  select(Sample)%>%
+  unique()
+
+##then we spread the proteomics data into a matrix
+phos.mat <- phos.dat%>%
+  select(LogRatio, Sample, site)%>%
+  tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
+                      values_fn=list(LogRatio=mean),values_fill=0.0)%>%
+  tibble::column_to_rownames('site')
+
+phos.diffex.treated <- limmaTwoFactorDEAnalysis(phos.mat,healthy$Sample,treated$Sample)
+
+phos.diffex.treated.late <- limmaTwoFactorDEAnalysis(phos.mat,healthy$Sample,treated.late$Sample)
+
+phos.diffex.treated.early <- limmaTwoFactorDEAnalysis(phos.mat,healthy$Sample,treated.early$Sample)
+
+phos.diffex.early.late <- limmaTwoFactorDEAnalysis(phos.mat,treated.early$Sample,treated.late$Sample)
+
+gene.to.site<-dplyr::select(phos.dat,Gene,site,Peptide)%>%distinct()%>%
+    dplyr::mutate(residue=stringr::str_replace(site,paste0(Gene,'-'),''))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([STY])", ";\\1"))%>%
+    dplyr::mutate(residue=stringr::str_replace(residue,"^;", ""))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([sty])", ""))
+```
+
+
+```{r Computing KSEA, eval=FALSE, include=FALSE}
+ksea.treated <- phos.diffex.treated %>%      
+    tibble::rownames_to_column('site') %>%
+    left_join(gene.to.site) %>%
+    dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val') %>%
+      computeKSEA(.,prefix='Healthy-vs-Treated',0.05) 
+
+ksea.treated.early <- phos.diffex.treated.early %>%      
+    tibble::rownames_to_column('site') %>%
+    left_join(gene.to.site) %>%
+    dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val') %>%
+      computeKSEA(.,prefix='Healthy-vs-Treated-early-period',0.05) 
+
+ksea.treated.late <- phos.diffex.treated.late %>%      
+    tibble::rownames_to_column('site') %>%
+    left_join(gene.to.site) %>%
+    dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val') %>%
+      computeKSEA(.,prefix='Healthy-vs-Treated-late-period',0.05) 
+
+ksea.early.late <- phos.diffex.early.late %>%      
+    tibble::rownames_to_column('site') %>%
+    left_join(gene.to.site) %>%
+    dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val') %>%
+      computeKSEA(.,prefix='Early-period-vs-Late-period',0.05) 
+```
+
+Below we collect the most significant differentially expressed phospho sites using the comparisons stated above, 
+as well as a KSEA plot made using the fold changes in phospho site expression.
+With a logarithmic scale we collect the adjusted p-values of each Kinase. 
+Note the KSEA plot shows only those Kinases with at least 5 substrates found in the data, 
+in addition to having an adjusted p-value below 0.05.
+
+## Healthy vs Treated
+
+We compare the healthy donor samples to all treated samples. 
+Red indicates up regulation in treated samples, while blue shows up-regulation
+in healthy samples.
+
+```{r Treated vs Healthy, fig.height = 8, fig.width = 14}
+show <- phos.diffex.treated %>%
+  select(-featureID, -t, -B) %>% filter(adj.P.Val < 0.05)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated")}
+knitr::include_graphics("sig-includedHealthy-vs-Treated-ksea-plot.png")
+```
+
+## Healthy vs Treated early
+
+Next, we compare healthy samples to early treatment samples, ie, 
+healthy samples to day 1 and pre-study samples. 
+Red indicates up regulation in early samples, while blue shows up-regulation
+in healthy samples.
+
+```{r Treated early vs Healthy, fig.height = 5, fig.width = 14}
+show <- phos.diffex.treated.early %>%
+  select(-featureID, -t, -B) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated early period")}
+knitr::include_graphics("sig-includedHealthy-vs-Treated-early-period-ksea-plot.png")
+```
+
+## Healthy vs Treated late
+
+Next, we compare healthy samples to late treatment samples, ie, 
+healthy samples to day 28 samples. Red indicates up-regulation in treated samples, 
+while blue shows up-regulation in healthy samples.
+
+```{r Treated late vs Healthy, fig.height = 8, fig.width = 14}
+show <- phos.diffex.treated.late %>%
+  select(-featureID, -t, -B) %>% filter(adj.P.Val < 0.05)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated late period")}
+knitr::include_graphics("sig-includedHealthy-vs-Treated-late-period-ksea-plot.png")
+```
+
+
+## Treated early vs treated late
+
+Finally, among the treated samples, we compare the early (day 1 and pre-study) samples
+to the late (day 28) samples. Red indicates up regulation in late samples, 
+while blue shows up-regulation in early samples. As we can see, of the kinases with
+at least 5 substrates in our data, only 1 reaches the 0.05 threshold. 
+
+```{r Treated early vs late, fig.height = 8, fig.width = 14}
+show <- phos.diffex.early.late %>%
+  select(-featureID, -t, -B) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Treated early vs Treated late")}
+knitr::include_graphics("sig-includedEarly-period-vs-Late-period-ksea-plot.png")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
