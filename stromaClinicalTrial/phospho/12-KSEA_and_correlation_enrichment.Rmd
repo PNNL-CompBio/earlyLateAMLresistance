@@ -1,0 +1,292 @@
+---
+title: "Sunil Ex17 Phospho Correlation Enrichment"
+author: "Camilo Posso"
+date: "06/22/2021"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include=FALSE}
+library(leapr)
+library(kableExtra)
+library(amlresistancenetworks)
+library(stats)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+source("../Util/synapseUtil.R")
+
+# corrected for loading mass and plexID, long time and subtle
+p.site.corrected <- querySynapseTable("syn25706631")
+
+phos.dat <- p.site.corrected
+phos.dat$Peptide <- sub("^.*@(.*)$", "\\1", phos.dat$Accession)
+phos.dat$site <- sub("^(.*)@.*$", "\\1", phos.dat$Accession)
+phos.dat$Gene <- sub("(.*)-.*$", "\\1", phos.dat$site)
+
+# from here we can select just the metadata of interest
+metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
+summary <- phos.dat%>%
+  select(metadata.columns)%>%
+  distinct()
+summary$Description <- as.character(summary$Description)
+
+# for exploration purposes, we create a new variable containing the type of sample,
+# as well as a boolean indicating the time group of the sample.
+summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
+                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
+summary[is.na(summary$Type), "Type"] <- "Treated"
+summary$Period <- case_when(grepl("Pre",summary$Description) | grepl("Day 1", summary$Description) ~ "Early",
+                            grepl("Day 28",summary$Description) ~ "Late")
+rownames(summary) <- summary$Sample
+```
+
+
+```{r eval=FALSE, include=FALSE}
+KSDB <- read.csv(system.file("PSP&NetworKIN_Kinase_Substrate_Dataset_July2016.csv", 
+                             package = "amlresistancenetworks"), stringsAsFactors = FALSE)
+
+kinase.members <- KSDB %>%
+  filter(Source == "PhosphoSitePlus") %>%
+  select(KINASE, SUB_GENE, SUB_MOD_RSD) %>%
+  mutate(Site = paste(SUB_GENE, SUB_MOD_RSD, sep = "-")) %>%
+  group_by(KINASE) %>%
+  summarise(Members = paste(Site, sep = "; ", collapse = "; "),
+            sizes = length(Site)) %>%
+  mutate(loose = strsplit(Members, "; "))
+
+Max <- max(kinase.members$sizes) + 1
+padded <- lapply(kinase.members$loose, 
+                 FUN = function(x) append(x, rep("null", Max-length(x))))
+
+names <- kinase.members$KINASE
+desc <- names
+sizes <- kinase.members$sizes
+names(sizes) <- names
+matrix <- matrix(unlist(padded), ncol = Max, nrow = length(names), byrow = TRUE)
+
+PhosphositeOnly <- list(names = names, 
+                        desc = rep("null", length(names)), 
+                        sizes = sizes, 
+                        matrix = matrix)
+```
+
+
+## Get dataset
+
+We access synapse to load the data in long form. We use data which has been corrected for both
+Loading mass effect, as well as plex effect. Below we see a metadata table for this experiment.
+
+```{r pressure, echo=FALSE}
+show <- summary %>%
+  select(-`BeatAML Patient ID`)
+kbl(show) %>%
+  kable_paper("hover", full_width = T)
+```
+
+Here we perform 4 comparisons. We compare the healthy group to the treated, 
+treated & early, and treated & late groups. We also compare the treated & early vs 
+treated & late groups.
+
+```{r prepare ratios and limma, eval=FALSE, include=FALSE}
+##select the samples of interest
+healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
+  select(Sample)%>%
+  unique()
+
+treated.late <- subset(summary, Period == "Late")%>%
+  select(Sample)%>%
+  unique()
+
+treated.early <- subset(summary, Period == "Early")%>%
+  select(Sample)%>%
+  unique()
+
+treated <- subset(summary, Type == 'Treated')%>%
+  select(Sample)%>%
+  unique()
+
+gene.to.site<-dplyr::select(phos.dat,Gene,site,Peptide)%>%distinct()%>%
+    dplyr::mutate(residue=stringr::str_replace(site,paste0(Gene,'-'),''))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([STY])", ";\\1"))%>%
+    dplyr::mutate(residue=stringr::str_replace(residue,"^;", ""))%>%
+    dplyr::mutate(residue=stringr::str_replace_all(residue,"([sty])", ""))
+
+residues <- gene.to.site$residue
+split.residues <- strsplit(residues, split = ";")
+lengths <- sapply(split.residues, length)
+single.residues <- data.frame(site = rep(gene.to.site$site, lengths), 
+                              Gene = rep(gene.to.site$Gene, lengths), 
+                              Residue = unlist(split.residues)) %>%
+  mutate(`single site` = paste(Gene, Residue, sep = "-"))
+
+# Split each phosphosite, ie GENE-S123S125 is split into GENE-S123, GENE-S125
+phos.dat.single.site <- merge(phos.dat, single.residues)
+
+phos.mat <- phos.dat.single.site %>%
+  select(LogRatio, Sample, `single site`, site) %>%
+  tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
+                      values_fn=list(LogRatio=mean),values_fill=0.0) %>%
+  mutate(count = rep(1,nrow(.))) 
+
+single.site <- phos.mat$`single site`
+
+# Average duplicate phosphosites (duplicates arise from splitting compound sites, eg GENE-S123S125)
+phos.mat <- phos.mat %>%
+  select(everything(),-`single site`, -site) %>%
+  rowsum(single.site) %>%
+  sweep(1, .$count, FUN = "/")
+```
+
+In this short report we collect both KSEA for each stated comparison, as well the results of
+Jason McDermott's correlation enrichment. 
+
+Correlation enrichment aims to identify pathways whose *genes* are highly correlated.
+Within a group of samples, this approach can help identify pathways whose genes shows a high degree of concordance.
+For a pathway \(\mathcal{P}\), we compute the correlation between all 
+*pairs of genes* belonging to \(\mathcal{P}\), and define the `Correlation Enrichment` 
+as the average correlation over all pairs. Values closer to 1 indicate that the genes 
+in \(\mathcal{P}\) are tightly correlated; this is the value we plot for each pathway below. 
+The p-value measures whether the difference in between the `Correlation Enrichment` and the 
+background average correlation among genes is significant.
+
+$$\\[1in]$$
+
+# Healthy vs Treated
+
+Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
+databases. We're comparing the healthy donor samples to all treated samples. 
+Red indicates increased activity in treated samples, while blue shows increased activity
+in healthy samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated")}
+knitr::include_graphics("sig-includedHealthy-vs-Treated-NetworKIN-ksea-plot.png")
+```
+
+### Correlation Enrichment
+
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Treated samples on the right. Kinases with higher enrichment score indicate more 
+concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworKIN databases when
+computing these results. Note that color does not have any
+meaning in correlation enrichment.
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png",
+                          "sig-included-Treated-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[1in]$$
+
+
+# Healthy vs Treated Early period
+
+Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
+databases. We're comparing the healthy donor samples to the early period treated samples. 
+Red indicates increased activity in early period treated samples, while blue shows increased activity
+in healthy samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Early period")}
+knitr::include_graphics("sig-includedHealthy-vs-Treated-early-period-NetworKIN-ksea-plot.png")
+```
+
+### Correlation Enrichment
+
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Early period treated samples on the right. Kinases with higher enrichment score indicate more 
+concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworKIN databases when
+computing these results. Note that color does not have any
+meaning in correlation enrichment.
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early period",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png",
+                          "sig-included-Treated early period-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[1in]$$
+
+
+# Healthy vs Treated Late period
+
+Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
+databases. We're comparing the healthy donor samples to Late period treated samples. 
+Red indicates increased activity in Late period treated samples, while blue shows increased activity
+in healthy samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Late period")}
+knitr::include_graphics("sig-includedHealthy-vs-Treated-late-period-NetworKIN-ksea-plot.png")
+```
+
+### Correlation Enrichment
+
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Late period treated samples on the right. Kinases with higher enrichment score indicate more 
+concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworKIN databases when
+computing these results. Note that color does not have any
+meaning in correlation enrichment.
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Late period",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png",
+                          "sig-included-Treated late period-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[1in]$$
+
+
+# Treated Early vs Treated Late
+
+Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
+databases. We're comparing the Early period treated samples to Late period treated samples. 
+Red indicates increased activity in Late treated samples, while blue shows increased activity
+in Early treated samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
+knitr::include_graphics("sig-includedEarly-period-vs-Late-period-NetworKIN-ksea-plot.png")
+```
+
+### Correlation Enrichment
+
+Below we show the correlation enrichment in Early treated samples on the left, 
+as well as Late treated samples on the right. Kinases with higher enrichment score indicate more 
+concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworKIN databases in
+computing these results. Note that color does not have any
+meaning in correlation enrichment.
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Treated Early period - Right: Treated Late period",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Treated early period-correlation-enrichment-plot.png",
+                          "sig-included-Treated late period-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[1in]$$
+
+
+[comment]: # (Below is the code to produce the enrichment correlation plots seen in this markdown)
+
+```{r enrichment correlation, eval=FALSE, include=FALSE}
+
+enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = phos.mat[, healthy$Sample], 
+                                                        prefix = "Healthy", pathway.plot.size = 4, 
+                                                        geneset = kinasesubstrates, corr.cutoff = 0.1,
+                                                        clean.names = FALSE)
+
+enrichment.correlation.treated <- plotCorrelationEnrichment(exprs = phos.mat[,treated$Sample], 
+                                                            prefix = "Treated", pathway.plot.size = 4,
+                                                            geneset = kinasesubstrates, corr.cutoff = 0.1,
+                                                            clean.names = FALSE)
+
+enrichment.correlation.treated.early <- plotCorrelationEnrichment(exprs = phos.mat[, treated.early$Sample], 
+                                                                  prefix = "Treated early period", pathway.plot.size = 4,
+                                                                  geneset = kinasesubstrates, corr.cutoff = 0.1,
+                                                                  clean.names = FALSE)
+
+enrichment.correlation.treated.late <- plotCorrelationEnrichment(exprs = phos.mat[, treated.late$Sample], 
+                                                                 prefix = "Treated late period", pathway.plot.size = 4,
+                                                                 geneset = kinasesubstrates, corr.cutoff = 0.1,
+                                                                 clean.names = FALSE)
+
+```
