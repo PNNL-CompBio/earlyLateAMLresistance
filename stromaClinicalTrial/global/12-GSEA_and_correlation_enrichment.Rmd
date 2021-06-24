@@ -418,6 +418,25 @@ enrichment.correlation.treated.late <- plotCorrelationEnrichment(exprs = prot.ma
 
 ```
 
+```{r prepare groups, eval=FALSE, include=FALSE, limma for GSEA, include=FALSE}
+prot.diffex.early.late <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,treated.early$Sample,treated.late$Sample) %>%
+  rename(value = "logFC") %>%
+  mutate(Gene = rownames(.))
+# gsea_data <- plotOldGSEA(prot.diffex.early.late, "Treated-early-period-vs-Treated-late-period", width = 15, order.by = "p.adjust")
+
+prot.diffex.treated <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,healthy$Sample,treated$Sample) %>%
+  rename(value = "logFC") %>%
+  mutate(Gene = rownames(.))
+
+prot.diffex.treated.late <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,healthy$Sample,treated.late$Sample) %>%
+  rename(value = "logFC") %>%
+  mutate(Gene = rownames(.))
+
+prot.diffex.treated.early <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,healthy$Sample,treated.early$Sample) %>%
+  rename(value = "logFC") %>%
+  mutate(Gene = rownames(.))
+
+```
 
 ```{r KEGG GSEA, eval=FALSE, include=FALSE}
 library(tidyr)
