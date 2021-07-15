@@ -1,0 +1,97 @@
+---
+title: "Sunil Ex17 Pathway + Kinase heatmaps"
+author: "Camilo Posso"
+date: "07/06/2021"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Metadata
+
+```{r libraries and setup, include=FALSE}
+library(kableExtra)
+library(amlresistancenetworks)
+library(stats)
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+source("../Util/synapseUtil.R")
+
+####### Make sure to run the corresponding script to make the plots. It is in the Making Plots folder.
+
+# corrected for loading mass and plexID, long time and subtle
+g.gene.corrected <- querySynapseTable("syn25706561")
+
+prot.dat <- g.gene.corrected
+
+# from here we can select just the metadata of interest
+metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
+summary <- prot.dat%>%
+  select(metadata.columns)%>%
+  distinct()
+summary$Description <- as.character(summary$Description)
+
+# for exploration purposes, we create a new variable containing the type of sample,
+# as well as a boolean indicating the time group of the sample.
+summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
+                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
+summary[is.na(summary$Type), "Type"] <- "Treated"
+summary$Period <- case_when(grepl("Pre",summary$Description) | grepl("Day 1", summary$Description) ~ "Early",
+                            grepl("Day 28",summary$Description) ~ "Late")
+rownames(summary) <- summary$Sample
+```
+
+Below we show only the metadata for the 7 patients.
+
+```{r metadata, echo=FALSE}
+
+show <- subset(summary, Type == "Treated") %>%
+  select(`BeatAML Patient ID`, Period, Plex, Description) %>%
+  dplyr::rename(ID = `BeatAML Patient ID`) %>%
+  arrange(ID, Period) %>%
+  mutate(Plex = as.character(Plex))
+
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+
+```
+
+$$\\[0.5in]$$ 
+ 
+Each of the 7 patients has both an early and late period. From these 7 samples, 4 consist 
+of only two time points (early point and late point) while the other 3 have multiple late time points. 
+We use these 7 patients to run GSEA (on global data) and KSEA (on phospho data) to compare the late 
+period to early period for each sample. After collecting these enrichment results, we re-adjust 
+the p-values using "BH" (Benjamini Hochberg) correction. We select only the top 50 most enriched
+pathways and select those with an adjusted p-value below 0.05. 
+
+In these plots, red indicates increased activity in the late period, while blue shows increased
+activity in the early period. Moreover, the asterisk indicates an adjusted p-value below 0.05 for that particular
+patient + pathway.
+
+### GSEA heatmaps
+
+We use the net enrichment score for each pathway + patient combination in the heatmap.
+
+```{r out.width="49%", out.height = "49%", fig.show='hold', fig.align='center', fig.cap=c("LEFT: KEGG ---- RIGHT: REACTOME")}
+knitr::include_graphics("Making Plots/Pathway heatmap all patients with significance - KEGG.png")
+knitr::include_graphics("Making Plots/Pathway heatmap all patients with significance - REACTOME.png")
+```
+
+```{r out.width="49%", out.height = "49%", fig.align='center', fig.cap=c("GENE ONTOLOGY BIOLOGICAL PROCESS")}
+knitr::include_graphics("Making Plots/Pathway heatmap all patients with significance - GENE ONTOLOGY.png")
+```
+
+
+
+
+
+
+
+
+

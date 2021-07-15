@@ -1,0 +1,495 @@
+---
+title: 'Sunil Ex17: Visualizing targeted genes using K-means biologically enriched
+  clusters'
+author: "Camilo Posso"
+date: "07/12/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Introduction
+
+```{r Setup, include=FALSE}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ggplot2)
+library(RColorBrewer)
+library(amlresistancenetworks)
+library(MSnbase)
+library(vp.misc)
+library(tidyr)
+library(reshape2)
+library(tidyverse)
+library(kableExtra)
+library(dplyr)
+
+
+# corrected for loading mass and plexID, long time and subtle
+g.gene.corrected <- querySynapseTable("syn25706561")
+prot.dat <- g.gene.corrected
+
+# List of 123 targeted genes
+genes <- read.table("Misc Files/13) Targeted genes.txt")
+genes <- genes$V1
+
+# from here we can select just the metadata of interest
+metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
+summary <- prot.dat%>%
+  select(metadata.columns)%>%
+  distinct()
+summary$Description <- as.character(summary$Description)
+summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
+                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
+summary[is.na(summary$Type), "Type"] <- "Treated"
+summary$Period <- case_when(grepl("Pre",summary$Description) | grepl("Day 1", summary$Description) ~ "Early",
+                            grepl("Day 28",summary$Description) ~ "Late")
+summary$heatmap.name <- paste(summary$`BeatAML Patient ID`, summary$Description)
+rownames(summary) <- summary$Sample
+
+# select the samples of interest
+healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
+  select(Sample) %>%
+  unique()
+
+patients <- subset(summary, Type == "Treated") %>%
+  select(Sample, `BeatAML Patient ID`, Period, Plex) %>%
+  dplyr::rename(ID = `BeatAML Patient ID`) %>%
+  mutate(Plex = as.character(Plex)) %>%
+  unique()
+
+early <- patients %>%
+  filter(Period == "Early") %>%
+  mutate(Sample = as.character(Sample))
+
+late <- patients %>%
+  filter(Period == "Late") %>%
+  mutate(Sample = as.character(Sample))
+
+##then we spread the proteomics data into a matrix
+colnames(prot.dat)[[1]] <- "Gene"
+prot.mat <- prot.dat%>%
+  select(LogRatio,Sample,Gene)%>%
+  tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
+                     values_fn=list(LogRatio=mean),values_fill=0.0)%>%
+  tibble::column_to_rownames('Gene')
+
+## Intersect targeted genes with our 6000 genes.
+ex16.genes <- genes[genes %in% rownames(prot.mat)]
+extra.genes <- genes[!(genes %in% rownames(prot.mat))]
+
+## Long format + shiting early point to zero
+mat <- prot.mat[, patients$Sample]
+
+dat.long <- mat %>%
+  as.matrix() %>%
+  melt() %>%
+  as.data.frame() %>%
+  dplyr::rename(Gene = Var1, Sample = Var2) %>%
+  merge(patients[, c("Sample", "Period", "ID")]) %>%
+  group_by(ID, Gene) %>%
+  mutate(x = 1:n(), value.centered = value - dplyr::first(value)) %>%
+  ungroup(ID, Gene)
+```
+
+```{r K-means clustering, include=FALSE}
+## K-means. The seed here is important, to ensure the clusters remain consistent across
+## different machines.
+set.seed(1)       
+kmeans3 <- kmeans(prot.mat[, patients$Sample], 3, iter.max = 40, nstart = 100)
+kmeans4 <- kmeans(prot.mat[, patients$Sample], 4, iter.max = 40, nstart = 100)
+kmeans5 <- kmeans(prot.mat[, patients$Sample], 5, iter.max = 40, nstart = 100)
+kmeans6 <- kmeans(prot.mat[, patients$Sample], 6, iter.max = 40, nstart = 100)
+kmeans7 <- kmeans(prot.mat[, patients$Sample], 7, iter.max = 40, nstart = 100)
+kmeans8 <- kmeans(prot.mat[, patients$Sample], 8, iter.max = 40, nstart = 100)
+kmeans9 <- kmeans(prot.mat[, patients$Sample], 9, iter.max = 40, nstart = 100)
+kmeans10 <- kmeans(prot.mat[, patients$Sample], 10, iter.max = 40, nstart = 100)
+kmeans11 <- kmeans(prot.mat[, patients$Sample], 11, iter.max = 40, nstart = 100)
+kmeans12 <- kmeans(prot.mat[, patients$Sample], 12, iter.max = 40, nstart = 100)
+
+clusters <- data.frame(Gene = rownames(prot.mat), Names = rownames(prot.mat)) %>%
+  column_to_rownames("Names") %>%
+  mutate(Kmeans3 = as.factor(kmeans3$cluster),
+         Kmeans4 = as.factor(kmeans4$cluster),
+         Kmeans5 = as.factor(kmeans5$cluster),
+         Kmeans6 = as.factor(kmeans6$cluster),
+         Kmeans7 = as.factor(kmeans7$cluster),
+         Kmeans8 = as.factor(kmeans8$cluster),
+         Kmeans9 = as.factor(kmeans9$cluster),
+         Kmeans10 = as.factor(kmeans10$cluster),
+         Kmeans11 = as.factor(kmeans11$cluster),
+         Kmeans12 = as.factor(kmeans12$cluster))
+```
+
+```{r GSEA on clusters, include=FALSE}
+enrichment <- list()
+total.significant <- list()
+
+for (i in 3:12){
+  column <- paste0("Kmeans", i)
+  print(table(clusters[[column]]))
+  total <- c()
+  for (j in 1:i){
+    gene.set <- rownames(clusters[clusters[[column]] == j, ])
+    name <- paste("K =", i, "cluster =", j)
+    enrichment[[name]] <- enrichGO(gene.set, 
+                                   OrgDb = org.Hs.eg.db, 
+                                   keyType = "SYMBOL", 
+                                   universe = rownames(prot.mat))@result %>%
+      filter(p.adjust < 0.05) %>%
+      dplyr::select(Description, GeneRatio, BgRatio, pvalue, p.adjust)
+    total <- c(total, nrow(enrichment[[name]]))
+  }
+  total.significant[[column]] <- total
+}
+```
+
+Our goal is to more easily visualize the differences and similarities among the 7 patients, specifically
+when it comes to the 123 targeted genes from Sunil's Ex16. Of these 123 genes, we find a total of 80 
+which were also identified in Ex17, which we summarize below.
+
+```{r loading data for faster knitting}
+dat.long$ID <- factor(dat.long$ID, levels = c("5029", "5087", "5180", "5210", "5145", "5174", "5104"))
+
+show <- data.frame(Present = ex16.genes[1:22], 
+                   `Present Cont.` = ex16.genes[23:44],
+                   `Present Cont.2 ` = ex16.genes[45:66],
+                   `Present Cont.3 ` = c(ex16.genes[67:80], rep("", 8)),
+                   `Not Present` = extra.genes[1:22],
+                   `Not Present Cont.` = c(extra.genes[23:43],""))
+colnames(show) <- c("Present", "Present", "Present", "Present", "Not Present", "Not Present")
+kbl(show) %>%
+  kable_paper("hover", full_width = T)
+
+linetypes <- c(rep("solid", 6), rep("dotted",6), rep("dashed", 6), rep("twodash",6), rep("12345678", 6))
+linecolors <- rep(c(brewer.pal(5, "Dark2"), "black"),5)
+```
+
+$$\\[0.2in]$$
+
+In order to more easily visualize the differences and commonalities in the targeted 
+genes among the patients, we first cluster the original ~6400 genes according to their
+expression profiles (that is, their expressions among all 7 patients), then for each cluster
+we plot the intensities of the targeted genes within that cluster. The idea here is that each
+cluster consists of genes which have similar expression profiles.
+
+For this task, we've used K-means clustering, an algorithm which generates a pre determined
+number of clusters (the value of K). In this report, we have clustered with a K value of 6, so our
+6400 genes have been partitioned into 6 clusters, with each gene belonging to exactly one cluster.
+For example, the 80 targeted genes belong to the following clusters.
+
+```{r targeted gene cluster membership}
+df <- data.frame(Cluster1 = c(intersect(rownames(clusters[clusters$Kmeans6 == 1, ]), ex16.genes), rep("", 15)),
+                 Cluster2 = c(intersect(rownames(clusters[clusters$Kmeans6 == 2, ]), ex16.genes), rep("", 6)),
+                 Cluster3 = c(intersect(rownames(clusters[clusters$Kmeans6 == 3, ]), ex16.genes), rep("", 9)),
+                 Cluster4 = intersect(rownames(clusters[clusters$Kmeans6 == 4, ]), ex16.genes),
+                 Cluster5 = c(intersect(rownames(clusters[clusters$Kmeans6 == 5, ]), ex16.genes), rep("", 13)),
+                 Cluster6 = c(intersect(rownames(clusters[clusters$Kmeans6 == 6, ]), ex16.genes), rep("", 15)))
+
+kbl(df) %>%
+  kable_paper("hover", full_width = T)
+  
+```
+
+$$\\[0.2in]$$
+
+A great question is: WHY did we choose `K = 6`? The reason is that 3 of the 6 clusters produced by K-means show
+very significant enrichment in biological function, and furthermore there is little overlap among
+the enriched biological functions among the 6 clusters. Thus we're able to 
+associate to each cluster a few distinct statistically significant biological processes.
+Note that you can easily go back to the top and select a new cluster using the table of contents.
+
+## Clustering with K = 6.
+
+Clustering using K-means with `K = 6` yields a total of 6 clusters. Three of these clusters
+showed little significant enrichment, while the other 3 showed quite a few significantly enriched terms.
+Below we show first the 3 most significantly enriched clusters, then follow up with the less significantly
+enriched clusters. 
+
+```{r, K6 summary plot}
+df <- data.frame()
+for (i in 1:6) {
+  name <- paste0("K = 6 cluster = ", i)
+  df <- rbind(df, data.frame(Cluster = i, N = nrow(enrichment[[name]])))
+}
+
+ggplot(df, aes(x = Cluster, y = N)) + geom_bar(stat = 'identity') + 
+  ggtitle("Number of significantly enriched terms by cluster", ) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+### Growth factor binding + Signaling receptor activity (Cluster 2)
+
+We have below the 20 most enriched terms within this cluster.
+
+```{r K6 cluster enrichment, cluster 2}
+df = enrichment[["K = 6 cluster = 2"]] %>%
+  select(Description, GeneRatio, p.adjust) %>%
+  mutate(Description = sapply(Description, function(y) paste(strwrap(y, 33), collapse = "<br>")),
+         p.adjust = format(p.adjust, digits = 5)) %>%
+  remove_rownames()
+df1 <- df[1:nrow(df)%%2 != 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+df2 <- df[1:nrow(df)%%2 == 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+
+df1 %>%
+  kable_styling(full_width = FALSE, position = "float_left")
+df2 %>%
+  kable_styling(full_width = FALSE, position = "left")
+
+```
+
+We set the early time point to zero (only for plotting purposes) below, and show only the targeted genes which 
+lie within this cluster.
+
+```{r include=FALSE}
+selected.genes.plot <- intersect(ex16.genes, clusters[clusters$Kmeans6 == 2, "Gene"])
+plot6_2 <- ggplot(dat.long[dat.long$Gene %in% selected.genes.plot,], 
+                aes(x = x, y = value.centered, group = Gene, color = Gene, linetype = Gene)) +
+  geom_line(aes(color = Gene)) + facet_grid(ID ~ ., scales = "free") + 
+  scale_linetype_manual(values = linetypes) +
+  scale_color_manual(values = linecolors) + xlab("Time point") 
+ggsave("plot6_2.png", plot = plot6_2)
+
+# heatmap.2(as.matrix(mat[selected.genes.plot,]), col = bluered, Colv = F)
+```
+
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Targeted genes within cluster")}
+knitr::include_graphics("plot6_2.png")
+```
+<a href="#top">Back to top</a>
+
+
+### Transcription regulator activity + mRNA binding (Cluster 3)
+
+We have below the 20 most enriched terms within this cluster.
+
+```{r K6 cluster enrichment, cluster 3}
+df = enrichment[["K = 6 cluster = 3"]] %>%
+  select(Description, GeneRatio, p.adjust) %>%
+  mutate(Description = sapply(Description, function(y) paste(strwrap(y, 33), collapse = "<br>")),
+         p.adjust = format(p.adjust, digits = 5)) %>%
+  remove_rownames()
+df1 <- df[1:nrow(df)%%2 != 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+df2 <- df[1:nrow(df)%%2 == 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+
+df1 %>%
+  kable_styling(full_width = FALSE, position = "float_left")
+df2 %>%
+  kable_styling(full_width = FALSE, position = "left")
+
+```
+
+We set the early time point to zero (only for plotting purposes) below, and show only the targeted genes which 
+lie within this cluster.
+
+```{r include=FALSE}
+selected.genes.plot <- intersect(ex16.genes, clusters[clusters$Kmeans6 == 3, "Gene"])
+plot6_3 <- ggplot(dat.long[dat.long$Gene %in% selected.genes.plot,], 
+                aes(x = x, y = value.centered, group = Gene, color = Gene, linetype = Gene)) +
+  geom_line(aes(color = Gene)) + facet_grid(ID ~ ., scales = "free") + 
+  scale_linetype_manual(values = linetypes) +
+  scale_color_manual(values = linecolors) + xlab("Time point") 
+ggsave("plot6_3.png", plot = plot6_3)
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Targeted genes within cluster")}
+knitr::include_graphics("plot6_3.png")
+```
+<a href="#top">Back to top</a>
+
+### GTPase binding + Translation regulator activity (Cluster 4)
+
+We have below the 20 most enriched terms within this cluster.
+
+```{r K6 cluster enrichment, cluster 4}
+df = enrichment[["K = 6 cluster = 4"]] %>%
+  select(Description, GeneRatio, p.adjust) %>%
+  mutate(Description = sapply(Description, function(y) paste(strwrap(y, 33), collapse = "<br>")),
+         p.adjust = format(p.adjust, digits = 5)) %>%
+  remove_rownames()
+df1 <- df[1:nrow(df)%%2 != 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+df2 <- df[1:nrow(df)%%2 == 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+
+df1 %>%
+  kable_styling(full_width = FALSE, position = "float_left")
+df2 %>%
+  kable_styling(full_width = FALSE, position = "left")
+
+```
+
+We set the early time point to zero (only for plotting purposes) below, and show only the targeted genes which 
+lie within this cluster.
+
+```{r include=FALSE}
+selected.genes.plot <- intersect(ex16.genes, clusters[clusters$Kmeans6 == 4, "Gene"])
+plot6_4 <- ggplot(dat.long[dat.long$Gene %in% selected.genes.plot,], 
+                aes(x = x, y = value.centered, group = Gene, color = Gene, linetype = Gene)) +
+  geom_line(aes(color = Gene)) + facet_grid(ID ~ ., scales = "free") + 
+  scale_linetype_manual(values = linetypes) +
+  scale_color_manual(values = linecolors) + xlab("Time point") 
+ggsave("plot6_4.png", plot = plot6_4)
+```
+
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Targeted genes within cluster")}
+knitr::include_graphics("plot6_4.png")
+```
+<a href="#top">Back to top</a>
+
+### Hsp90 protein binding + Heat shock protein binding (Cluster 1)
+
+We have below the 20 most enriched terms within this cluster.
+
+```{r K6 cluster enrichment, cluster 1}
+df = enrichment[["K = 6 cluster = 1"]] %>%
+  select(Description, GeneRatio, p.adjust) %>%
+  mutate(Description = sapply(Description, function(y) paste(strwrap(y, 33), collapse = "<br>")),
+         p.adjust = format(p.adjust, digits = 5)) %>%
+  remove_rownames()
+df1 <- df[1:nrow(df)%%2 != 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+df2 <- df[1:nrow(df)%%2 == 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+
+df1 %>%
+  kable_styling(full_width = FALSE, position = "float_left")
+df2 %>%
+  kable_styling(full_width = FALSE, position = "left")
+
+```
+
+We set the early time point to zero (only for plotting purposes) below, and show only the targeted genes which 
+lie within this cluster.
+
+```{r include=FALSE}
+selected.genes.plot <- intersect(ex16.genes, clusters[clusters$Kmeans6 == 1, "Gene"])
+plot6_1 <- ggplot(dat.long[dat.long$Gene %in% selected.genes.plot,], 
+                aes(x = x, y = value.centered, group = Gene, color = Gene, linetype = Gene)) +
+  geom_line(aes(color = Gene)) + facet_grid(ID ~ ., scales = "free") + 
+  scale_linetype_manual(values = linetypes) +
+  scale_color_manual(values = linecolors) + xlab("Time point") 
+ggsave("plot6_1.png", plot = plot6_1)
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Targeted genes within cluster")}
+knitr::include_graphics("plot6_1.png")
+```
+<a href="#top">Back to top</a>
+
+### Ion transmembrane transporter activity + Transmembrane transporter activity (Cluster 6)
+
+We have below the 20 most enriched terms within this cluster.
+
+```{r K6 cluster enrichment, cluster 6}
+df = enrichment[["K = 6 cluster = 6"]] %>%
+  select(Description, GeneRatio, p.adjust) %>%
+  mutate(Description = sapply(Description, function(y) paste(strwrap(y, 33), collapse = "<br>")),
+         p.adjust = format(p.adjust, digits = 5)) %>%
+  remove_rownames()
+df1 <- df[1:nrow(df)%%2 != 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+df2 <- df[1:nrow(df)%%2 == 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+
+df1 %>%
+  kable_styling(full_width = FALSE, position = "float_left")
+df2 %>%
+  kable_styling(full_width = FALSE, position = "left")
+
+```
+
+We set the early time point to zero (only for plotting purposes) below, and show only the targeted genes which 
+lie within this cluster.
+
+```{r include=FALSE}
+selected.genes.plot <- intersect(ex16.genes, clusters[clusters$Kmeans6 == 6, "Gene"])
+plot6_6 <- ggplot(dat.long[dat.long$Gene %in% selected.genes.plot,], 
+                aes(x = x, y = value.centered, group = Gene, color = Gene, linetype = Gene)) +
+  geom_line(aes(color = Gene)) + facet_grid(ID ~ ., scales = "free") + 
+  scale_linetype_manual(values = linetypes) +
+  scale_color_manual(values = linecolors) + xlab("Time point") 
+ggsave("plot6_6.png", plot = plot6_6)
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Targeted genes within cluster")}
+knitr::include_graphics("plot6_6.png")
+```
+<a href="#top">Back to top</a>
+
+### No significant enrichment (Cluster 5)
+
+We have below the 20 most enriched terms within this cluster.
+
+```{r K6 cluster enrichment, cluster 5}
+df = enrichment[["K = 6 cluster = 5"]] %>%
+  select(Description, GeneRatio, p.adjust) %>%
+  mutate(Description = sapply(Description, function(y) paste(strwrap(y, 33), collapse = "<br>")),
+         p.adjust = format(p.adjust, digits = 5)) %>%
+  remove_rownames()
+df1 <- df[1:nrow(df)%%2 != 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+df2 <- df[1:nrow(df)%%2 == 0, ] %>%
+  head(10) %>%
+  kable(format = 'html', output = F, escape = F) %>%
+  kable_styling()
+
+df1 %>%
+  kable_styling(full_width = FALSE, position = "float_left")
+df2 %>%
+  kable_styling(full_width = FALSE, position = "left")
+
+```
+
+We set the early time point to zero (only for plotting purposes) below, and show only the targeted genes which 
+lie within this cluster.
+
+```{r include=FALSE}
+selected.genes.plot <- intersect(ex16.genes, clusters[clusters$Kmeans6 == 5, "Gene"])
+plot6_5 <- ggplot(dat.long[dat.long$Gene %in% selected.genes.plot,], 
+                aes(x = x, y = value.centered, group = Gene, color = Gene, linetype = Gene)) +
+  geom_line(aes(color = Gene)) + facet_grid(ID ~ ., scales = "free") + 
+  scale_linetype_manual(values = linetypes) +
+  scale_color_manual(values = linecolors) + xlab("Time point") 
+ggsave("plot6_5.png", plot = plot6_5)
+```
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Targeted genes within cluster")}
+knitr::include_graphics("plot6_5.png")
+```
+<a href="#top">Back to top</a>
