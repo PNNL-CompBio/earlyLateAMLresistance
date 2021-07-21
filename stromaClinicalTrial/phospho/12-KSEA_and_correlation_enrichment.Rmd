@@ -22,6 +22,7 @@ library(stats)
 library(ggplot2)
 library(gridExtra)
 library(dplyr)
+library(readr)
 source("../../Util/synapseUtil.R")
 
 # corrected for loading mass and plexID, long time and subtle
@@ -252,11 +253,11 @@ $$\\[.2in]$$
 ### Treated Early vs Pre-Treatment
 
 Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
-databases. We're comparing the Early period treated samples to Late period treated samples. 
-Red indicates increased activity in Late treated samples, while blue shows increased activity
-in Early treated samples. 
+databases. We're comparing the Pre-Treatment samples to Treated early samples. 
+Red indicates increased activity in Treated Early samples, while blue shows increased activity
+in Pre-Treated samples. 
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
+```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Treated Early")}
 knitr::include_graphics("sig-includedPre-Treatment-vs-Early-ksea-plot.png")
 ```
 
@@ -268,7 +269,7 @@ concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworK
 computing these results. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Treated Early period - Right: Treated Late period",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Treated Early",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-Pre-Treatment-correlation-enrichment-plot.png",
                           "sig-included-Treated Early-correlation-enrichment-plot.png"))
 ``` 
