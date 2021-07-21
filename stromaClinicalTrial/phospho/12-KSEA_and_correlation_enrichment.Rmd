@@ -186,7 +186,7 @@ knitr::include_graphics("sig-includedHealthy-vs-Treated-ksea-plot.png")
 
 Below we show the correlation enrichment in Healthy samples on the left, 
 as well as Treated samples on the right. Kinases with higher enrichment score indicate more 
-concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworKIN databases when
+concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases when
 computing these results. Note that color does not have any
 meaning in correlation enrichment.
 
@@ -200,8 +200,8 @@ $$\\[.2in]$$
 ### Healthy vs Pre-Treatment
 
 Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
-databases. We're comparing the healthy donor samples to Late period treated samples. 
-Red indicates increased activity in Late period treated samples, while blue shows increased activity
+databases. We're comparing the healthy donor samples to Pre-Treatment samples. 
+Red indicates increased activity in Pre-Treatment samples, while blue shows increased activity
 in healthy samples. 
 
 ```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Pre-Treatment")}
@@ -211,7 +211,7 @@ knitr::include_graphics("sig-includedHealthy-vs-Pre-Treatment-ksea-plot.png")
 ### Correlation Enrichment
 
 Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Late period treated samples on the right. Kinases with higher enrichment score indicate more 
+as well as Pre-Treatment samples on the right. Kinases with higher enrichment score indicate more 
 concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases when
 computing these results. Note that color does not have any
 meaning in correlation enrichment.
@@ -224,7 +224,7 @@ knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png"
 $$\\[.2in]$$
 
 
-### Healthy vs Treated Early period
+### Healthy vs Treated Early
 
 Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
 databases. We're comparing the healthy donor samples to the early period treated samples. 
@@ -239,7 +239,7 @@ knitr::include_graphics("sig-includedHealthy-vs-Treated-early-ksea-plot.png")
 
 Below we show the correlation enrichment in Healthy samples on the left, 
 as well as Early period treated samples on the right. Kinases with higher enrichment score indicate more 
-concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworKIN databases when
+concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases when
 computing these results. Note that color does not have any
 meaning in correlation enrichment.
 
@@ -263,9 +263,9 @@ knitr::include_graphics("sig-includedPre-Treatment-vs-Early-ksea-plot.png")
 
 ### Correlation Enrichment
 
-Below we show the correlation enrichment in Early treated samples on the left, 
-as well as Late treated samples on the right. Kinases with higher enrichment score indicate more 
-concordance among the genes in that kinase. We use the PhosphoSitePlus + NetworKIN databases in
+Below we show the correlation enrichment in Pre-Treatment samples on the left, 
+as well as Treated Early samples on the right. Kinases with higher enrichment score indicate more 
+concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases in
 computing these results. Note that color does not have any
 meaning in correlation enrichment.
 
