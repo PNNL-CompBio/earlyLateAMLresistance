@@ -1,44 +1,41 @@
-TUBE LABEL,BeatAML Patient ID,Tx Status,BeatAML Specimen ID,SUBMISSION DATE,Classification,,,
-1,Healthy Donor Stroma,,17-01076,10.27.2020,,,,
-2,Healthy Donor Stroma,,17-01077,10.27.2020,,,,
-3,Healthy Donor Stroma,,17-01087,10.27.2020,,,,
-4,Healthy Donor Stroma,,17-01095,10.27.2020,,,,
-5,Healthy Donor Stroma,,17-01100,10.27.2020,,,,
-6,Healthy Donor Stroma,,17-01101,10.27.2020,,,,
-7,Healthy Donor Stroma,,20-00263,10.27.2020,,,,
-8,Healthy Donor Stroma,,20-00264,10.27.2020,,,,
-9,Healthy Donor Stroma,,20-00265,10.27.2020,,,,
-10,Cell line,,HS-5 - R1,10.27.2020,,,,
-11,Cell line,,HS-5 - R2,10.27.2020,,,,
-12,Cell line,,HS-5 - R3,01.13.2021,,,,
-13,Cell line,,HS-5 - R4,01.13.2021,,,,
-14,Cell line,,HS-5 - R5,01.13.2021,,,,
-15,Cell line,,HS-23 - R1,01.13.2021,,,,
-16,Cell line,,HS-23 - R2,01.13.2021,,,,
-17,Cell line,,HS-23 - R3,01.13.2021,,,,
-18,Cell line,,HS-27 - R1,01.13.2021,,,,
-19,Cell line,,HS-27 - R2,01.13.2021,,,,
-20,Cell line,,HS-27 - R3,01.13.2021,,,,
-21,5029,P1B Cycle 1 Day 1,19-00020,01.13.2021,early,,,
-22,5029,P1B Cycle 9 Day 28,20-00013,01.13.2021,Late,,,
-23,5087,P2 Cycle 1 Day 1,19-00038,01.13.2021,pre-treatment,,,
-24,5087,P2 Cycle 1 Day 28,19-00086,01.13.2021,early,,,
-25,5104,P2 Cycle 1 Day 1,19-00074,01.13.2021,pre-treatment,,,
-26,5104,P2 Cycle 1 Day 28,19-00110,01.13.2021,early,,,
-27,5104,P1B Cycle 2 Day 28,19-00227,01.13.2021,early,,,
-28,5104,P1B Cycle 3 Day 28,19-00277,01.13.2021,early,,,
-29,5104,P1B Cycle 6 Day 28,19-00425,01.13.2021,early,,,
-30,5104,P1B Conc Cycle 9 Day 28,20-00032,01.13.2021,Late,,,
-31,5145,P2 Cycle 1 Day 1,19-00150,01.13.2021,pre-treatment,,,
-32,5145,P2 Cycle 2 Day 28,19-00268,01.13.2021,early,,,
-33,5145,P2 Cycle 3 Day 28,19-00320,01.13.2021,early,,,
-34,5174,P2 Cycle 1 Day 1,19-00208,01.13.2021,pre-treatment,,,
-35,5174,P2 Cycle 1 Day 28,19-00257,01.13.2021,early,,,
-36,5174,P1B Cycle 1 Day 28,19-00309,01.13.2021,early,,,
-37,5210,P2 Pre-Study,19-00306,01.13.2021,pre-treatment,,,
-38,5210,P2 Cycle 2 Day 28,19-00410,01.13.2021,early,,,
-39,5180,P2 Pre-Study,19-00218,01.13.2021,pre-treatment,,,
-40,5180,P2 Cycle 1 Day 28,19-00272,01.13.2021,early,,,
-,,,,,,,,
-,,,,,,,,
-,,,,,,,,
+TUBE LABEL,BeatAML Patient ID,Tx Status,,,Classification
+1,Healthy Donor Stroma,,,,
+2,Healthy Donor Stroma,,,,
+3,Healthy Donor Stroma,,,,
+4,Healthy Donor Stroma,,,,
+5,Healthy Donor Stroma,,,,
+6,Healthy Donor Stroma,,,,
+7,Healthy Donor Stroma,,,,
+8,Healthy Donor Stroma,,,,
+9,Healthy Donor Stroma,,,,
+10,Cell line,,,,
+11,Cell line,,,,
+12,Cell line,,,,
+13,Cell line,,,,
+14,Cell line,,,,
+15,Cell line,,,,
+16,Cell line,,,,
+17,Cell line,,,,
+18,Cell line,,,,
+19,Cell line,,,,
+20,Cell line,,,,
+21,5029,P1B Cycle 1 Day 1,,,early
+22,5029,P1B Cycle 9 Day 28,,,Late
+23,5087,P2 Cycle 1 Day 1,,,pre-treatment
+24,5087,P2 Cycle 1 Day 28,,,early
+25,5104,P2 Cycle 1 Day 1,,,pre-treatment
+26,5104,P2 Cycle 1 Day 28,,,early
+27,5104,P1B Cycle 2 Day 28,,,early
+28,5104,P1B Cycle 3 Day 28,,,early
+29,5104,P1B Cycle 6 Day 28,,,early
+30,5104,P1B Conc Cycle 9 Day 28,,,Late
+31,5145,P2 Cycle 1 Day 1,,,pre-treatment
+32,5145,P2 Cycle 2 Day 28,,,early
+33,5145,P2 Cycle 3 Day 28,,,early
+34,5174,P2 Cycle 1 Day 1,,,pre-treatment
+35,5174,P2 Cycle 1 Day 28,,,early
+36,5174,P1B Cycle 1 Day 28,,,early
+37,5210,P2 Pre-Study,,,pre-treatment
+38,5210,P2 Cycle 2 Day 28,,,early
+39,5180,P2 Pre-Study,,,pre-treatment
+40,5180,P2 Cycle 1 Day 28,,,early

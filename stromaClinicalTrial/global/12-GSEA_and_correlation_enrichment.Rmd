@@ -5,6 +5,7 @@ date: "06/22/2021"
 output: 
   html_document:
     code_folding: hide
+    toc: true
 ---
 
 ```{r setup, include=FALSE}
@@ -16,7 +17,8 @@ library(amlresistancenetworks)
 library(dplyr)
 library(kableExtra)
 library(leapr)
-source("../Util/synapseUtil.R")
+library(readr)
+source("../../Util/synapseUtil.R")
 
 # corrected for loading mass and plexID, long time and subtle
 g.gene.corrected <- querySynapseTable("syn25706561")
@@ -29,15 +31,16 @@ summary <- prot.dat%>%
   select(metadata.columns)%>%
   distinct()
 summary$Description <- as.character(summary$Description)
-
-# for exploration purposes, we create a new variable containing the type of sample,
-# as well as a boolean indicating the time group of the sample.
 summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
                           summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
 summary[is.na(summary$Type), "Type"] <- "Treated"
-summary$Period <- case_when(grepl("Pre",summary$Description) | grepl("Day 1", summary$Description) ~ "Early",
-                            grepl("Day 28",summary$Description) ~ "Late")
-rownames(summary) <- summary$Sample
+
+## Updated time period annotation. Adding a pre-treatment, early, and late period.
+correct.time.annotation <- as.data.frame(read_csv("../Updated time period annotation.csv"))
+summary$Period <- correct.time.annotation[summary$Sample, "Classification"]
+summary$Period <- case_when(grepl("early", summary$Period) ~ "Early",
+                            grepl("Late", summary$Period) ~ "Late",
+                            grepl("pre-treatment", summary$Period) ~ "Pre-Treatment")
 ```
 
 ## Get dataset
@@ -67,6 +70,10 @@ treated.early <- subset(summary, Period == "Early")%>%
   select(Sample)%>%
   unique()
 
+treated.pre <- subset(summary, Period == "Pre-Treatment") %>%
+  select(Sample) %>%
+  unique()
+
 treated <- subset(summary, Type == 'Treated')%>%
   select(Sample)%>%
   unique()
@@ -80,7 +87,7 @@ prot.mat <- prot.dat%>%
   tibble::column_to_rownames('Gene')
 ```
 
-In this short report we collect both rank based GSEA for each stated comparison, as well the results of
+In this report we collect both rank based GSEA for each stated comparison, as well the results of
 Jason McDermott's correlation enrichment. 
 
 Correlation enrichment aims to identify pathways whose *genes* are highly correlated.
@@ -119,9 +126,35 @@ knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot
                           "sig-included-Kegg Treated-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[1in]$$
+$$\\[0.2in]$$
 
-### Healthy vs Treated Early period GSEA
+### Healthy vs Pre-Treatment GSEA
+
+Below we have a GSEA plot computed using the KEGG pathway
+database. We're comparing the healthy donor samples to Pre-Treatment samples. 
+Red indicates increased activity in Pre-Treatment samples, while blue shows increased activity
+in healthy samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Pre-Treatment")}
+knitr::include_graphics("sig-includedkegg Healthy vs Pre-Treatment-gsea-plot.png")
+```
+
+### Correlation Enrichment
+
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Pre-Treatment samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
+meaning in correlation enrichment.
+
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Pre-Treatment",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot.png",
+                          "sig-included-Kegg Pre-Treatment-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[0.2in]$$
+
+### Healthy vs Treated Early GSEA
 
 Below we have a GSEA plot computed using the KEGG pathway
 database. We're comparing the healthy donor samples to early period treated samples. 
@@ -129,7 +162,7 @@ Red indicates increased activity in early treated samples, while blue shows incr
 in healthy samples. 
 
 ```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Early period")}
-knitr::include_graphics("sig-includedkegg Healthy vs Treated Early period-gsea-plot.png")
+knitr::include_graphics("sig-includedkegg Healthy vs Treated Early-gsea-plot.png")
 ```
 
 ### Correlation Enrichment
@@ -140,64 +173,37 @@ concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early period",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot.png",
-                          "sig-included-Kegg Treated early period-correlation-enrichment-plot.png"))
+                          "sig-included-Kegg Treated Early-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[1in]$$
+$$\\[0.2in]$$
 
-### Healthy vs Treated Late period GSEA
+### Pre-Treatment vs Treated Early GSEA
 
 Below we have a GSEA plot computed using the KEGG pathway
-database. We're comparing the healthy donor samples to late period treated samples. 
-Red indicates increased activity in late period treated samples, while blue shows increased activity
-in healthy samples.  
+database. We're comparing the Pre-Treatment samples to Treated Early samples. 
+Red indicates increased activity in Treated early samples, while blue shows increased activity
+in Pre-Treatment samples. 
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Late period")}
-knitr::include_graphics("sig-includedkegg Healthy vs Treated Late period-gsea-plot.png")
+```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Treated Early")}
+knitr::include_graphics("sig-includedkegg Pre-Treatment vs Treated Early-gsea-plot.png")
 ```
 
 ### Correlation Enrichment
 
-Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Late period treated samples on the right. Pathways with higher enrichment score indicate more 
+Below we show the correlation enrichment in Pre-Treatment samples on the left, 
+as well as Treated Early samples on the right. Pathways with higher enrichment score indicate more 
 concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Late period",fig.show='hold',fig.align='center'}
-knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot.png",
-                          "sig-included-Kegg Treated late period-correlation-enrichment-plot.png"))
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Treated Early",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Kegg Pre-Treatment-correlation-enrichment-plot.png",
+                          "sig-included-Kegg Treated Early-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[1in]$$
-
-
-### Treated Early vs Treated Late GSEA
-
-Below we have a GSEA plot computed using the KEGG pathway
-database. We're comparing the Early period donor samples to Late period treated samples. 
-Red indicates increased activity in late treated samples, while blue shows increased activity
-in early treated samples. 
-
-```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
-knitr::include_graphics("sig-includedkegg Treated Early period vs Treated Late period-gsea-plot.png")
-```
-
-### Correlation Enrichment
-
-Below we show the correlation enrichment in Early treated samples on the left, 
-as well as Late treated samples on the right. Pathways with higher enrichment score indicate more 
-concordance among the genes in that pathway. Note that color does not have any
-meaning in correlation enrichment.
-
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Treated Early period - Right: Treated Late period",fig.show='hold',fig.align='center'}
-knitr::include_graphics(c("sig-included-Kegg Treated early period-correlation-enrichment-plot.png",
-                          "sig-included-Kegg Treated late period-correlation-enrichment-plot.png"))
-``` 
-
-$$\\[1in]$$
-
+$$\\[.2in]$$
 
 ## Using Reactome
 
@@ -224,10 +230,35 @@ knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-
                           "sig-included-REACTOME Treated-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[1in]$$
+$$\\[0.2in]$$
+
+### Healthy vs Pre-Treatment GSEA
+
+Below we have a GSEA plot computed using the Reactome pahway
+database. We're comparing the healthy donor samples to Pre-Treatment samples. 
+Red indicates increased activity in Pre-Treatment samples, while blue shows increased activity
+in healthy samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Pre-Treatment")}
+knitr::include_graphics("sig-includedreactome Healthy vs Pre-Treatment-gsea-plot.png")
+```
+
+### Correlation Enrichment
+
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Pre-Treatment samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
+meaning in correlation enrichment.
 
 
-### Healthy vs Treated Early period GSEA
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Pre-Treatment",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-plot.png",
+                          "sig-included-REACTOME Pre-Treatment-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[0.2in]$$
+
+### Healthy vs Treated Early GSEA
 
 Below we have a GSEA plot computed using the Reactome pathway
 database. We're comparing the healthy donor samples to early period treated samples. 
@@ -235,7 +266,7 @@ Red indicates increased activity in early treated samples, while blue shows incr
 in healthy samples. 
 
 ```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Early period")}
-knitr::include_graphics("sig-includedreactome Healthy vs Treated Early period-gsea-plot.png")
+knitr::include_graphics("sig-includedreactome Healthy vs Treated Early-gsea-plot.png")
 ```
 
 ### Correlation Enrichment
@@ -246,64 +277,36 @@ concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early period",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-plot.png",
-                          "sig-included-REACTOME Treated early period-correlation-enrichment-plot.png"))
+                          "sig-included-REACTOME Treated Early-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[1in]$$
+$$\\[0.2in]$$
 
+### Pre-Treatment vs Treated Early GSEA
 
-### Healthy vs Treated Late period GSEA
-
-Below we have a GSEA plot computed using the Reactome pathway
-database. We're comparing the healthy donor samples to late period treated samples. 
-Red indicates increased activity in late period treated samples, while blue shows increased activity
-in healthy samples.  
-
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Late period")}
-knitr::include_graphics("sig-includedreactome Healthy vs Treated Late period-gsea-plot.png")
-```
+There were no Reactome Pathways which showed an adjusted p-value below 0.05.
 
 ### Correlation Enrichment
 
-Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Late period treated samples on the right. Pathways with higher enrichment score indicate more 
+Below we show the correlation enrichment in Pre-Treatment samples on the left, 
+as well as Treated Early samples on the right. Pathways with higher enrichment score indicate more 
 concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Late period",fig.show='hold',fig.align='center'}
-knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-plot.png",
-                          "sig-included-REACTOME Treated late period-correlation-enrichment-plot.png"))
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Treated Early",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-REACTOME Pre-Treatment-correlation-enrichment-plot.png",
+                          "sig-included-REACTOME Treated Early-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[1in]$$
+$$\\[.2in]$$
 
 
-### Treated Early vs Treated Late GSEA
 
-Below we have a GSEA plot computed using the Reactome pathway
-database. We're comparing the Early period donor samples to Late period treated samples. 
-Red indicates increased activity in late treated samples, while blue shows increased activity
-in early treated samples. 
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
-knitr::include_graphics("sig-includedreactome Treated Early period vs Treated Late period-gsea-plot.png")
-```
 
-### Correlation Enrichment
 
-Below we show the correlation enrichment in Early treated samples on the left, 
-as well as Late treated samples on the right. Pathways with higher enrichment score indicate more 
-concordance among the genes in that pathway. Note that color does not have any
-meaning in correlation enrichment.
-
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Treated Early period - Right: Treated Late period",fig.show='hold',fig.align='center'}
-knitr::include_graphics(c("sig-included-REACTOME Treated early period-correlation-enrichment-plot.png",
-                          "sig-included-REACTOME Treated late period-correlation-enrichment-plot.png"))
-``` 
-
-$$\\[1in]$$
 
 [comment]: # (Below is the code to produce all the plots seen in this markdown)
 
@@ -348,94 +351,69 @@ reactomepaths <- list(names = names.reactome,
 
 enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = prot.mat[, healthy$Sample], 
                                                         prefix = "Kegg Healthy", pathway.plot.size = 4, 
-                                                        geneset = keggpaths, corr.cutoff = 0.25,
+                                                        geneset = keggpaths, corr.cutoff = 0.33,
                                                         clean.names = FALSE, height = 12)
 
 enrichment.correlation.treated <- plotCorrelationEnrichment(exprs = prot.mat[,treated$Sample], 
                                                             prefix = "Kegg Treated", pathway.plot.size = 4,
-                                                            geneset = keggpaths, corr.cutoff = 0.25,
+                                                            geneset = keggpaths, corr.cutoff = 0.33,
                                                             clean.names = FALSE, height = 12)
 
-enrichment.correlation.treated.early <- plotCorrelationEnrichment(exprs = prot.mat[, treated.early$Sample], 
-                                                                  prefix = "Kegg Treated early period", pathway.plot.size = 4,
-                                                                  geneset = keggpaths, corr.cutoff = 0.25,
-                                                                  clean.names = FALSE, height = 12)
-
-enrichment.correlation.treated.late <- plotCorrelationEnrichment(exprs = prot.mat[, treated.late$Sample], 
-                                                                 prefix = "Kegg Treated late period", pathway.plot.size = 4,
-                                                                 geneset = keggpaths, corr.cutoff = 0.25,
-                                                                 clean.names = FALSE, height = 12)
-
-```
-
-```{r enrichment correlation ncipid, eval=FALSE, include=FALSE}
-
-enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = prot.mat[, healthy$Sample], 
-                                                        prefix = "ncipid Healthy", pathway.plot.size = 4, 
-                                                        geneset = ncipid, corr.cutoff = 0.25,
+enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = prot.mat[,treated.pre$Sample], 
+                                                        prefix = "Kegg Pre-Treatment", pathway.plot.size = 4,
+                                                        geneset = keggpaths, corr.cutoff = 0.33,
                                                         clean.names = FALSE, height = 12)
 
-enrichment.correlation.treated <- plotCorrelationEnrichment(exprs = prot.mat[,treated$Sample], 
-                                                            prefix = "ncipid Treated", pathway.plot.size = 4,
-                                                            geneset = ncipid, corr.cutoff = 0.25,
-                                                            clean.names = FALSE, height = 12)
-
 enrichment.correlation.treated.early <- plotCorrelationEnrichment(exprs = prot.mat[, treated.early$Sample], 
-                                                                  prefix = "ncipid Treated early period", pathway.plot.size = 4,
-                                                                  geneset = ncipid, corr.cutoff = 0.25,
+                                                                  prefix = "Kegg Treated Early", pathway.plot.size = 4,
+                                                                  geneset = keggpaths, corr.cutoff = 0.33,
                                                                   clean.names = FALSE, height = 12)
-
-enrichment.correlation.treated.late <- plotCorrelationEnrichment(exprs = prot.mat[, treated.late$Sample], 
-                                                                 prefix = "ncipid Treated late period", pathway.plot.size = 4,
-                                                                 geneset = ncipid, corr.cutoff = 0.25,
-                                                                 clean.names = FALSE, height = 12)
-
 ```
 
 ```{r enrichment correlation REACTOME, eval=FALSE, include=FALSE}
 
 enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = prot.mat[, healthy$Sample], 
                                                         prefix = "REACTOME Healthy", pathway.plot.size = 4, 
-                                                        geneset = reactomepaths, corr.cutoff = 0.25,
+                                                        geneset = reactomepaths, corr.cutoff = 0.4,
                                                         clean.names = FALSE, height = 12)
 
 enrichment.correlation.treated <- plotCorrelationEnrichment(exprs = prot.mat[,treated$Sample], 
                                                             prefix = "REACTOME Treated", pathway.plot.size = 4,
-                                                            geneset = reactomepaths, corr.cutoff = 0.25,
+                                                            geneset = reactomepaths, corr.cutoff = 0.4,
                                                             clean.names = FALSE, height = 12)
 
+enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = prot.mat[,treated.pre$Sample], 
+                                                        prefix = "REACTOME Pre-Treatment", pathway.plot.size = 4,
+                                                        geneset = reactomepaths, corr.cutoff = 0.4,
+                                                        clean.names = FALSE, height = 12)
+
 enrichment.correlation.treated.early <- plotCorrelationEnrichment(exprs = prot.mat[, treated.early$Sample], 
-                                                                  prefix = "REACTOME Treated early period", 
+                                                                  prefix = "REACTOME Treated Early", 
                                                                   pathway.plot.size = 4,
-                                                                  geneset = reactomepaths, corr.cutoff = 0.25,
+                                                                  geneset = reactomepaths, corr.cutoff = 0.4,
                                                                   clean.names = FALSE, height = 12)
-
-enrichment.correlation.treated.late <- plotCorrelationEnrichment(exprs = prot.mat[, treated.late$Sample], 
-                                                                 prefix = "REACTOME Treated late period", 
-                                                                 pathway.plot.size = 4,
-                                                                 geneset = reactomepaths, corr.cutoff = 0.25,
-                                                                 clean.names = FALSE, height = 12)
-
 ```
 
-```{r prepare groups, eval=FALSE, include=FALSE, limma for GSEA, include=FALSE}
-prot.diffex.early.late <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,treated.early$Sample,treated.late$Sample) %>%
-  rename(value = "logFC") %>%
-  mutate(Gene = rownames(.))
-# gsea_data <- plotOldGSEA(prot.diffex.early.late, "Treated-early-period-vs-Treated-late-period", width = 15, order.by = "p.adjust")
-
-prot.diffex.treated <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,healthy$Sample,treated$Sample) %>%
+```{r limma for GSEA, eval=FALSE, include=FALSE,, include=FALSE}
+## LogFC computed as treated - healthy.
+prot.diffex.treated <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-prot.diffex.treated.late <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,healthy$Sample,treated.late$Sample) %>%
+## LogFC computed as pre-treatment - healthy
+prot.diffex.pre <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.pre$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-prot.diffex.treated.early <- amlresistancenetworks::limmaTwoFactorDEAnalysis(prot.mat,healthy$Sample,treated.early$Sample) %>%
+## LogFC computed as early - healthy
+prot.diffex.early <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.early$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
+## LogFC computed as early - pre-treatment
+prot.diffex.earlyvspre <- limmaTwoFactorDEAnalysis(prot.mat, treated.pre$Sample, treated.early$Sample) %>%
+  rename(value = "logFC") %>%
+  mutate(Gene = rownames(.))
 ```
 
 ```{r KEGG GSEA, eval=FALSE, include=FALSE}
@@ -471,14 +449,14 @@ term.2.name <- data.frame(term = keggpaths$names, name = keggpaths$names)
 plotGSEA(prot.diffex.treated, term.2.gene = term.2.gene, 
          term.2.name = term.2.name, prefix = "kegg Healthy vs Treated")
 
-plotGSEA(prot.diffex.treated.early, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "kegg Healthy vs Treated Early period")
+plotGSEA(prot.diffex.pre, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Healthy vs Pre-Treatment")
 
-plotGSEA(prot.diffex.treated.late, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "kegg Healthy vs Treated Late period")
+plotGSEA(prot.diffex.early, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Healthy vs Treated Early")
 
-plotGSEA(prot.diffex.early.late, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "kegg Treated Early period vs Treated Late period")
+plotGSEA(prot.diffex.earlyvspre, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Pre-Treatment vs Treated Early")
 
 ```
 
@@ -514,14 +492,14 @@ term.2.name <- data.frame(term = reactomepaths$names, name = reactomepaths$names
 plotGSEA(prot.diffex.treated, term.2.gene = term.2.gene, 
          term.2.name = term.2.name, prefix = "reactome Healthy vs Treated")
 
-plotGSEA(prot.diffex.treated.early, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "reactome Healthy vs Treated Early period")
+plotGSEA(prot.diffex.pre, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Healthy vs Pre-Treatment")
 
-plotGSEA(prot.diffex.treated.late, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "reactome Healthy vs Treated Late period")
+plotGSEA(prot.diffex.early, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Healthy vs Treated Early")
 
-plotGSEA(prot.diffex.early.late, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "reactome Treated Early period vs Treated Late period")
+plotGSEA(prot.diffex.earlyvspre, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Pre-Treatment vs Treated Early")
 
 ```
 
