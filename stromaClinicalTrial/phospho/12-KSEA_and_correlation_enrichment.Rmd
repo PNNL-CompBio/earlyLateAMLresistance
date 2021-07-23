@@ -276,6 +276,22 @@ knitr::include_graphics(c("sig-included-Pre-Treatment-correlation-enrichment-plo
 
 $$\\[.2in]$$
 
+### Treated Late vs Treated Early
+
+Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
+databases. We're comparing the Treated early samples to Treated late samples. 
+Red indicates increased activity in Treated late samples, while blue shows increased activity
+in Treated early samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
+knitr::include_graphics("sig-includedEarly-vs-Late-ksea-plot.png")
+```
+
+### Correlation Enrichment
+
+As we have only two treated late samples, we cannot compute correlation enrichment results
+for the treated late samples, as the correlation will always be 1.
+
 
 [comment]: # (Below is the code to produce the enrichment correlation plots seen in this markdown)
 

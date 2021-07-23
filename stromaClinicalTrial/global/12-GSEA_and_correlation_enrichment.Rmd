@@ -205,6 +205,24 @@ knitr::include_graphics(c("sig-included-Kegg Pre-Treatment-correlation-enrichmen
 
 $$\\[.2in]$$
 
+### Treated Early vs Treated late GSEA
+
+Below we have a GSEA plot computed using the KEGG pathway
+database. We're comparing the Treated early samples to treated late samples. 
+Red indicates increased activity in treated late samples, while blue shows increased activity
+in treated early samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
+knitr::include_graphics("sig-includedkegg Treated Early vs Treated Late-gsea-plot.png")
+```
+
+### Correlation Enrichment
+
+As we have only two treated late samples, we cannot compute correlation enrichment results
+for the treated late samples, as the correlation will always be 1.
+
+$$\\[.2in]$$
+
 ## Using Reactome
 
 ### Healthy vs Treated GSEA
@@ -302,7 +320,23 @@ knitr::include_graphics(c("sig-included-REACTOME Pre-Treatment-correlation-enric
 
 $$\\[.2in]$$
 
+### Treated Early vs Treated late GSEA
 
+Below we have a GSEA plot computed using the Reactome pathway
+database. We're comparing the Treated early samples to treated late samples. 
+Red indicates increased activity in treated late samples, while blue shows increased activity
+in treated early samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
+knitr::include_graphics("sig-includedreactome Treated Early vs Treated Late-gsea-plot.png")
+```
+
+### Correlation Enrichment
+
+As we have only two treated late samples, we cannot compute correlation enrichment results
+for the treated late samples, as the correlation will always be 1.
+
+$$\\[.2in]$$
 
 
 
@@ -414,6 +448,11 @@ prot.diffex.early <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.
 prot.diffex.earlyvspre <- limmaTwoFactorDEAnalysis(prot.mat, treated.pre$Sample, treated.early$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
+
+## LogFC computed as late - early
+prot.diffex.latevsearly <- limmaTwoFactorDEAnalysis(prot.mat, treated.early$Sample, treated.late$Sample) %>%
+  rename(value = "logFC") %>%
+  mutate(Gene = rownames(.))
 ```
 
 ```{r KEGG GSEA, eval=FALSE, include=FALSE}
@@ -458,6 +497,9 @@ plotGSEA(prot.diffex.early, term.2.gene = term.2.gene,
 plotGSEA(prot.diffex.earlyvspre, term.2.gene = term.2.gene, 
          term.2.name = term.2.name, prefix = "kegg Pre-Treatment vs Treated Early")
 
+plotGSEA(prot.diffex.latevsearly, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Treated Early vs Treated Late")
+
 ```
 
 
@@ -500,6 +542,9 @@ plotGSEA(prot.diffex.early, term.2.gene = term.2.gene,
 
 plotGSEA(prot.diffex.earlyvspre, term.2.gene = term.2.gene, 
          term.2.name = term.2.name, prefix = "reactome Pre-Treatment vs Treated Early")
+
+plotGSEA(prot.diffex.latevsearly, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Treated Early vs Treated Late")
 
 ```
 

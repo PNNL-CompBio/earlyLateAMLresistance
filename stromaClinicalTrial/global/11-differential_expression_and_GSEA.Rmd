@@ -116,6 +116,11 @@ prot.diffex.earlyvspre <- limmaTwoFactorDEAnalysis(prot.mat, treated.pre$Sample,
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
+## LogFC computed as late - early
+prot.diffex.latevsearly <- limmaTwoFactorDEAnalysis(prot.mat, treated.early$Sample, treated.late$Sample) %>%
+  rename(value = "logFC") %>%
+  mutate(Gene = rownames(.))
+
 ```
 
 
@@ -132,6 +137,8 @@ plotOldGSEA(prot.diffex.early, "Healthy-vs-Treated, early-period", width = 15)
 plotOldGSEA(prot.diffex.late, "Healthy-vs-Treated, late-period", width = 15)
 
 plotOldGSEA(prot.diffex.earlyvspre, "Pre-Treatment-vs-Early", width = 15)
+
+plotOldGSEA(prot.diffex.latevsearly, "Early-vs-Late", width = 15)
 
 ```
 
@@ -225,3 +232,21 @@ kbl(show) %>%
 ```{r, include=TRUE, fig.align="center"}
 knitr::include_graphics("sig-includedPre-Treatment-vs-Early-gseaGO-plot.png")
 ```
+
+### Early vs Late
+
+Finally, we compare the treated Early samples to the treated Late samples.
+Red indicates increased activity in Treated late samples, while blue shows increased activity
+in Pre-Treatment samples.
+
+```{r Late vs Early}
+show <- prot.diffex.latevsearly %>%
+  select(-featureID, -t, -B) %>% head(.)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+```
+
+```{r, include=TRUE, fig.align="center"}
+knitr::include_graphics("sig-includedEarly-vs-Late-gseaGO-plot.png")
+```
+
