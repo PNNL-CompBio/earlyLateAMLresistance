@@ -115,6 +115,9 @@ phos.diffex.late <- limmaTwoFactorDEAnalysis(phos.mat, healthy$Sample, treated.l
 ## LogFC computed as early - pre-treatment
 phos.diffex.earlyvspre <- limmaTwoFactorDEAnalysis(phos.mat, treated.pre$Sample, treated.early$Sample)
 
+## LogFC computed as late - early
+phos.diffex.latevsearly <- limmaTwoFactorDEAnalysis(phos.mat, treated.early$Sample, treated.late$Sample)
+
 ```
 
 
@@ -151,6 +154,12 @@ ksea.earlyvspre <- phos.diffex.earlyvspre %>%
   left_join(gene.to.site) %>%
   dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val') %>%
   computeKSEA(prefix = "Pre-Treatment-vs-Early", ksea_FDR = 0.05)
+
+ksea.earlyvspre <- phos.diffex.latevsearly %>%
+  tibble::rownames_to_column('site') %>%
+  left_join(gene.to.site) %>%
+  dplyr::select(Gene,Peptide,residue,value='logFC',p_adj='adj.P.Val') %>%
+  computeKSEA(prefix = "Early-vs-late", ksea_FDR = 0.05)
 
 ```
 
@@ -249,3 +258,21 @@ kbl(show) %>%
 ```{r, include=TRUE, fig.align="center"}
 knitr::include_graphics("sig-includedPre-Treatment-vs-Early-ksea-plot.png")
 ```
+
+### Early vs Late
+
+Finally, we compare the treated Early samples to the treated Late samples.
+Red indicates increased activity in Treated late samples, while blue shows increased activity
+in Pre-Treatment samples.
+
+```{r Late vs Early}
+show <- phos.diffex.latevsearly %>%
+  select(-featureID, -t, -B) %>% head(10)
+kbl(show) %>%
+  kable_paper("hover", full_width = F)
+```
+
+```{r, include=TRUE, fig.align="center"}
+knitr::include_graphics("sig-includedEarly-vs-Late-ksea-plot.png")
+```
+
