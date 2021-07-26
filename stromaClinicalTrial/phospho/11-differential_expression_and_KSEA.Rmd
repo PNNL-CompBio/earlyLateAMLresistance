@@ -118,6 +118,19 @@ phos.diffex.earlyvspre <- limmaTwoFactorDEAnalysis(phos.mat, treated.pre$Sample,
 ## LogFC computed as late - early
 phos.diffex.latevsearly <- limmaTwoFactorDEAnalysis(phos.mat, treated.early$Sample, treated.late$Sample)
 
+############################ Saving tables for further use ##################################
+# write.table(phos.diffex.treated, "Treated - Healthy.txt", sep = "\t")
+# 
+# write.table(phos.diffex.pre, "Pre-Treatment - Healthy.txt", sep = "\t")
+# 
+# write.table(phos.diffex.early, "Early - Healthy.txt", sep = "\t")
+# 
+# write.table(phos.diffex.late, "Late - Healthy.txt", sep = "\t")
+# 
+# write.table(phos.diffex.earlyvspre, "Early - Pre-Treatment.txt", sep = "\t")
+# 
+# write.table(phos.diffex.latevsearly, "Late - Early.txt", sep = "\t")
+
 ```
 
 
