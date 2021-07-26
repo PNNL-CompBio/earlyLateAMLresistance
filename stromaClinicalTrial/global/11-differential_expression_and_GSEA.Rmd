@@ -121,6 +121,31 @@ prot.diffex.latevsearly <- limmaTwoFactorDEAnalysis(prot.mat, treated.early$Samp
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
+############################ Saving tables for further use ##################################
+# prot.diffex.treated <- prot.diffex.treated %>%
+#   rename(logFC = value) %>%
+#   write.table("Treated - Healthy.txt", sep = "\t")
+# 
+# prot.diffex.pre <- prot.diffex.pre %>%
+#   rename(logFC = value) %>%
+#   write.table("Pre-Treatment - Healthy.txt", sep = "\t")
+# 
+# prot.diffex.early <- prot.diffex.early %>%
+#   rename(logFC = value) %>%
+#   write.table("Early - Healthy.txt", sep = "\t")
+# 
+# prot.diffex.late <- prot.diffex.late %>%
+#   rename(logFC = value) %>%
+#   write.table("Late - Healthy.txt", sep = "\t")
+# 
+# prot.diffex.earlyvspre <- prot.diffex.earlyvspre %>%
+#   rename(logFC = value) %>%
+#   write.table("Early - Pre-Treatment.txt", sep = "\t")
+# 
+# prot.diffex.latevsearly <- prot.diffex.latevsearly %>%
+#   rename(logFC = value) %>%
+#   write.table("Late - Early.txt", sep = "\t")
+
 ```
 
 
