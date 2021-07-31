@@ -322,7 +322,14 @@ $$\\[0.2in]$$
 
 ### Pre-Treatment vs Treated Early GSEA
 
-There were no Reactome Pathways which showed an adjusted p-value below 0.05.
+Below we have a GSEA plot computed using the reactome pathway
+database. We're comparing the Pre-Treatment samples to Treated Early samples. 
+Red indicates increased activity in Treated early samples, while blue shows increased activity
+in Pre-Treatment samples. 
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Treated Early")}
+knitr::include_graphics("sig-includedreactome Pre-Treatment vs Treated Early-gsea-plot.png")
+```
 
 ### Correlation Enrichment
 
