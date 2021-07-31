@@ -42,6 +42,10 @@ summary$Description <- as.character(summary$Description)
 summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
                           summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
 summary[is.na(summary$Type), "Type"] <- "Treated"
+rownames(summary) <- as.numeric(summary$Sample)
+summary <- summary %>%
+  mutate(Sample.numeric = as.numeric(Sample)) %>%
+  arrange(Sample)
 
 ## Elie has corrected the time period annotation. Adding a pre-treatment, early, and late period.
 correct.time.annotation <- as.data.frame(read_csv("../Updated time period annotation.csv"))
@@ -49,7 +53,15 @@ summary$Period <- correct.time.annotation[summary$Sample, "Classification"]
 summary$Period <- case_when(grepl("early", summary$Period) ~ "Early",
                             grepl("Late", summary$Period) ~ "Late",
                             grepl("pre-treatment", summary$Period) ~ "Pre-Treatment")
-rownames(summary) <- summary$Sample
+rownames(summary) <- as.numeric(summary$Sample)
+
+## Organizing time points into the right order (not alphanumeric)
+time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cycle 2 Day 28", "P2 Cycle 3 Day 28", 
+                 "P1B Cycle 1 Day 1", "P1B Cycle 1 Day 28", "P1B Cycle 2 Day 28", "P1B Cycle 3 Day 28", "P1B Cycle 6 Day 28",
+                 "P1B Cycle 9 Day 28", "P1B Conc Cycle 9 Day 28") %>%
+  factor(.)
+
+summary$Description <- factor(summary$Description, levels = time.points)
 ```
 
 
@@ -101,6 +113,10 @@ treated & late groups.
 
 ```{r prepare ratios and limma, eval=FALSE, include=FALSE}
 ##select the samples of interest
+earliest.samples <- subset(summary, Period == "Early") %>%
+  group_by(`BeatAML Patient ID`) %>%
+  slice(1)
+
 healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
   select(Sample)%>%
   unique()
@@ -109,15 +125,23 @@ treated.late <- subset(summary, Period == "Late")%>%
   select(Sample)%>%
   unique()
 
-treated.early <- subset(summary, Period == "Early")%>%
-  select(Sample)%>%
+### Choosing earliest time point
+treated.early <- subset(summary, Period == "Early") %>%
+  group_by(`BeatAML Patient ID`) %>%
+  slice(1) %>%
+  ungroup(`BeatAML Patient ID`) %>%
+  select(Sample) %>%
   unique()
 
 treated.pre <- subset(summary, Period == "Pre-Treatment") %>%
   select(Sample) %>%
   unique()
 
+### Choosing earliest time point
 treated <- subset(summary, Type == 'Treated')%>%
+  group_by(`BeatAML Patient ID`) %>%
+  slice(1) %>%
+  ungroup(`BeatAML Patient ID`) %>%
   select(Sample)%>%
   unique()
 
