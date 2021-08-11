@@ -1,7 +1,7 @@
 ---
 title: "Sunil Ex17 Global differential expression & GSEA"
 author: "Camilo Posso"
-date: "06/01/2021"
+date: "08/11/2021"
 output: 
   html_document:
     code_folding: hide
@@ -17,29 +17,19 @@ library(amlresistancenetworks)
 library(kableExtra)
 library(dplyr)
 library(readr)
+library(readxl)
+library(limma)
 source("../../Util/synapseUtil.R")
 
 # corrected for loading mass and plexID, long time and subtle
-g.gene.corrected <- querySynapseTable("syn25706561")
+g.gene.corrected <- querySynapseTable("syn26047126")
 
 prot.dat <- g.gene.corrected
 
-# from here we can select just the metadata of interest
-metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
-summary <- prot.dat%>%
-  select(metadata.columns)%>%
-  distinct()
-summary$Description <- as.character(summary$Description)
-summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
-                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
-summary[is.na(summary$Type), "Type"] <- "Treated"
-
-## Elie has corrected the time period annotation. Adding a pre-treatment, early, and late period.
-correct.time.annotation <- as.data.frame(read_csv("../Updated time period annotation.csv"))
-summary$Period <- correct.time.annotation[summary$Sample, "Classification"]
-summary$Period <- case_when(grepl("early", summary$Period) ~ "Early",
-                            grepl("Late", summary$Period) ~ "Late",
-                            grepl("pre-treatment", summary$Period) ~ "Pre-Treatment")
+## We have the metadata selected from the long form table
+summary <- g.gene.corrected[1:40, c("Sample", "BeatAML Patient ID", "Plex", 
+                                    "Loading Mass", "Description", "Period", "Treatment")]
+rownames(summary) <- summary$Sample
 
 ## Organizing time points into the right order (not alphanumeric)
 time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cycle 2 Day 28", "P2 Cycle 3 Day 28", 
@@ -47,141 +37,177 @@ time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cy
                  "P1B Cycle 9 Day 28", "P1B Conc Cycle 9 Day 28") %>%
   factor(.)
 
-summary$Description <- factor(summary$Description, levels = time.points)
-```
 
-### Get dataset
+summary$Description <- factor(summary$Description, levels = time.points)
+summary <- summary[sort(summary$Sample), ]
+summary$`BeatAML Patient ID` <- factor(summary$`BeatAML Patient ID`, levels = unique(summary$`BeatAML Patient ID`))
+summary$Treatment <- make.names(summary$Treatment)
+``` 
+
+### Introduction
 
 We access synapse to load the data in long form. We use data which has been corrected for both
 Loading mass effect, as well as plex effect. Below we see a metadata table for this experiment.
 
 ```{r pressure, echo=FALSE}
-show <- summary %>%
-  select(-`BeatAML Patient ID`)
+show <- summary 
 kbl(show) %>%
   kable_paper("hover", full_width = F)
 
 ```
 
 In this report, we collect the results of rank based GSEA, as well as differential expression. We perform
-5 comparisons overall. First, we compare the Healthy group to the Treated group. Now, as we can see,
-the Treated group itself consists of 3 subgroups determined by the Period of treatment, namely Pre-Treatment,
-Early and Late, so we compare the Healthy group to each of these 3 subgroups as well. Finally, we compare the
-Pre-Treatment group directly to the Early group.
+5 comparisons overall. First, we compare the Healthy group to the Pre-Treatment group, the Gilteritinib group, and the 
+Decitabine group. As some patients are over-represented in these groups (such as patient 5104), we choose the *earliest*
+representative sample per patient per group.
 
 ```{r prepare groups, limma, and early vs late gsea, include=FALSE}
+
 ##select the samples of interest
-earliest.samples <- subset(summary, Period == "Early") %>%
+healthy <- subset(summary, `BeatAML Patient ID` == 'Healthy Donor Stroma')
+
+pre.treatment <- subset(summary, Period == "Pre-Treatment")
+
+## Earliest sample, per patient, which has been treated with GILT
+treated.gilt <- subset(summary, Treatment == "GILT") %>%
+  filter(`BeatAML Patient ID` != "5029") %>%
   group_by(`BeatAML Patient ID`) %>%
   slice(1)
 
-healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
-  select(Sample)%>%
-  unique()
-
-treated.late <- subset(summary, Period == "Late")%>%
-  select(Sample)%>%
-  unique()
-
-treated.early <- subset(summary, Period == "Early") %>%
+## Earliest sample, per patient, which has been treated with GILT + DEC
+treated.gilt.and.dec <- subset(summary, Treatment == "GILT...DEC") %>%
   group_by(`BeatAML Patient ID`) %>%
-  slice(1) %>%
-  ungroup(`BeatAML Patient ID`) %>%
-  select(Sample) %>%
-  unique()
-
-treated.pre <- subset(summary, Period == "Pre-Treatment") %>%
-  select(Sample) %>%
-  unique()
-
-treated <- subset(summary, Type == 'Treated')%>%
-  group_by(`BeatAML Patient ID`) %>%
-  slice(1) %>%
-  ungroup(`BeatAML Patient ID`) %>%
-  select(Sample)%>%
-  unique()
+  slice(1)
 
 ##then we spread the proteomics data into a matrix
 colnames(prot.dat)[[1]] <- "Gene"
 prot.mat <- prot.dat%>%
   select(LogRatio,Sample,Gene)%>%
   tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
-                      values_fn=list(LogRatio=mean),values_fill=0.0)%>%
+                     values_fn=list(LogRatio=mean))%>%
   tibble::column_to_rownames('Gene')
 
-## LogFC computed as treated - healthy.
-prot.diffex.treated <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated$Sample) %>%
-  rename(value = "logFC") %>%
-  mutate(Gene = rownames(.))
+#### Comparisons to Healthy cells ####
 
 ## LogFC computed as pre-treatment - healthy
-prot.diffex.pre <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.pre$Sample) %>%
+prot.diffex.pre <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, pre.treatment$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-## LogFC computed as early - healthy
-prot.diffex.early <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.early$Sample) %>%
+## LogFC computed as treated GILT - healthy.
+prot.diffex.gilt <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.gilt$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-## LogFC computed as late - healthy
-prot.diffex.late <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.late$Sample) %>%
+## LogFC computed as treated GILT+DEC - healthy
+prot.diffex.gilt.dec <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.gilt.and.dec$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-## LogFC computed as early - pre-treatment
-prot.diffex.earlyvspre <- limmaTwoFactorDEAnalysis(prot.mat, treated.pre$Sample, treated.early$Sample) %>%
-  rename(value = "logFC") %>%
-  mutate(Gene = rownames(.))
 
-## LogFC computed as late - early
-prot.diffex.latevsearly <- limmaTwoFactorDEAnalysis(prot.mat, treated.early$Sample, treated.late$Sample) %>%
-  rename(value = "logFC") %>%
-  mutate(Gene = rownames(.))
+#### Paired comparisons for Pre vs GILT and GILT vs GILT + DEC ####
+## Pre vs GILT. logFC computed as GILT - PRE
+samples.compared <- rbind(pre.treatment, treated.gilt)
+ID <- factor(samples.compared$`BeatAML Patient ID`, levels = unique(samples.compared$`BeatAML Patient ID`))
+Treatment <- factor(samples.compared$Treatment, levels = c("PRE", "GILT"))
+design <- model.matrix(~ID+Treatment)
+fit <- lmFit(prot.mat[, samples.compared$Sample], design)
+fit <- eBayes(fit)
+prot.paired.gilt.vs.pre <- topTable(fit, coef = "TreatmentGILT", number = Inf) %>%
+  mutate(featureID = rownames(.),
+         Gene = rownames(.)) %>%
+  rename(value = logFC) %>%
+  arrange(P.Value)
+
+### To make sure the moderated t-statistics resemble those from a t.test
+# t.test(as.numeric(prot.mat["RAB5B", treated.gilt$Sample]),
+#        as.numeric(prot.mat["RAB5B", pre.treatment$Sample]),
+#        paired = T)
+
+## GILT vs GILT+DEC. logFC computed as GILT...DEC - GILT
+## Choosing only GILT samples with corresponding GILT+DEC 
+treated.gilt.restricted <- subset(summary, Treatment == "GILT") %>%
+  filter(`BeatAML Patient ID` %in% treated.gilt.and.dec$`BeatAML Patient ID`)
+samples.compared <- rbind(treated.gilt.restricted, treated.gilt.and.dec)
+ID <- factor(samples.compared$`BeatAML Patient ID`, levels = unique(samples.compared$`BeatAML Patient ID`))
+Treatment <- factor(samples.compared$Treatment, levels = c("GILT", "GILT...DEC"))
+design <- model.matrix(~ID+Treatment)
+fit <- lmFit(prot.mat[, samples.compared$Sample], design)
+fit <- eBayes(fit)
+prot.paired.giltdec.vs.gilt <- topTable(fit, coef = "TreatmentGILT...DEC", number = Inf) %>%
+  mutate(featureID = rownames(.),
+         Gene = rownames(.)) %>%
+  rename(value = logFC) %>%
+  arrange(P.Value)
+
+### To make sure the moderated t-statistics resemble those from a t.test
+# t.test(as.numeric(prot.mat["GLMP", treated.gilt.and.dec$Sample]), 
+#        as.numeric(prot.mat["GLMP", treated.gilt.restricted$Sample]),
+#        paired = T)
+
+# ### Equivalent way of testing Gilt vs Pre (paired t-test) using limma contrasts
+# samples.compared <- rbind(pre.treatment, treated.gilt)
+# ID <- factor(samples.compared$`BeatAML Patient ID`, levels = unique(samples.compared$`BeatAML Patient ID`))
+# Treatment <- factor(samples.compared$Treatment, levels = c("PRE", "GILT"))
+# design <- model.matrix(~0+Treatment+ID)
+# fit <- lmFit(prot.mat[, samples.compared$Sample], design)
+# contrast.matrix <- makeContrasts("TreatmentGILT-TreatmentPRE", levels = design)
+# fit <- contrasts.fit(fit, contrast.matrix)
+# fit <- eBayes(fit)
+# res4 <- topTable(fit, coef = "TreatmentGILT-TreatmentPRE", number = Inf) %>%
+#   mutate(featureID = rownames(.)) %>%
+#   arrange(P.Value)
+# 
+# 
+# ### Equivalent way of testing Gilt + Dec vs Gilt (paired t-test) using limma contrasts
+# samples.compared <- rbind(treated.gilt.restricted, treated.gilt.and.dec)
+# ID <- factor(samples.compared$`BeatAML Patient ID`, levels = unique(samples.compared$`BeatAML Patient ID`))
+# Treatment <- factor(samples.compared$Treatment, levels = c("GILT", "GILT...DEC"))
+# design <- model.matrix(~0+Treatment+ID)
+# fit <- lmFit(prot.mat[, samples.compared$Sample], design)
+# contrast.matrix <- makeContrasts("TreatmentGILT...DEC-TreatmentGILT", levels = design)
+# fit <- contrasts.fit(fit, contrast.matrix)
+# fit <- eBayes(fit)
+# res4 <- topTable(fit, coef = "TreatmentGILT...DEC-TreatmentGILT", number = Inf) %>%
+#   mutate(featureID = rownames(.)) %>%
+#   arrange(P.Value)
 
 ############################ Saving tables for further use ##################################
-# prot.diffex.treated <- prot.diffex.treated %>%
-#   rename(logFC = value) %>%
-#   write.table("Treated - Healthy.txt", sep = "\t")
-# 
 # prot.diffex.pre <- prot.diffex.pre %>%
 #   rename(logFC = value) %>%
-#   write.table("Pre-Treatment - Healthy.txt", sep = "\t")
+#   write.table("Ex17 Global Differential Expression Pre-Treatment - Healthy.txt", sep = "\t", row.names = F)
 # 
-# prot.diffex.early <- prot.diffex.early %>%
+# prot.diffex.gilt <- prot.diffex.gilt %>%
 #   rename(logFC = value) %>%
-#   write.table("Early - Healthy.txt", sep = "\t")
+#   write.table("Ex17 Global Differential Expression Gilteritinib - Healthy.txt", sep = "\t", row.names = F)
 # 
-# prot.diffex.late <- prot.diffex.late %>%
+# prot.diffex.gilt.dec <- prot.diffex.gilt.dec %>%
 #   rename(logFC = value) %>%
-#   write.table("Late - Healthy.txt", sep = "\t")
+#   write.table("Ex17 Global Differential Expression Gilteritinib Decitabine - Healthy.txt", sep = "\t", row.names = F)
 # 
-# prot.diffex.earlyvspre <- prot.diffex.earlyvspre %>%
+# prot.paired.gilt.vs.pre <- prot.paired.gilt.vs.pre %>%
 #   rename(logFC = value) %>%
-#   write.table("Early - Pre-Treatment.txt", sep = "\t")
+#   write.table("Ex17 Global Differential Expression Gilteritinib - Pre-Treatment (paired).txt", sep = "\t", row.names = F)
 # 
-# prot.diffex.latevsearly <- prot.diffex.latevsearly %>%
+# prot.paired.giltdec.vs.gilt <- prot.paired.giltdec.vs.gilt %>%
 #   rename(logFC = value) %>%
-#   write.table("Late - Early.txt", sep = "\t")
+#   write.table("Ex17 Global Differential Expression Gilteritinib Decitabine - Gilteritinib (paired).txt", sep = "\t", row.names = F)
 
 ```
 
 
 ```{r computing GSEA, eval=FALSE, include=FALSE}
-## Run this to make the pictures, saved at script location
+## Run this to make the pictures
 set.seed(117)
-
-plotOldGSEA(prot.diffex.treated, "Healthy-vs-Treated", width = 15)
-
 plotOldGSEA(prot.diffex.pre, "Healthy-vs-Pre-Treatment", width = 15)
-
-plotOldGSEA(prot.diffex.early, "Healthy-vs-Treated, early-period", width = 15)
-
-plotOldGSEA(prot.diffex.late, "Healthy-vs-Treated, late-period", width = 15)
-
-plotOldGSEA(prot.diffex.earlyvspre, "Pre-Treatment-vs-Early", width = 15)
-
-plotOldGSEA(prot.diffex.latevsearly, "Early-vs-Late", width = 15)
+set.seed(117)
+plotOldGSEA(prot.diffex.gilt, "Healthy-vs-Gilterinib", width = 15)
+set.seed(117)
+plotOldGSEA(prot.diffex.gilt.dec, "Healthy-vs-Gilterinib & Decitabine", width = 15)
+set.seed(117)
+plotOldGSEA(prot.paired.gilt.vs.pre, "Pre-Treatment-vs-Gilteritinib", width = 15)
+set.seed(117)
+plotOldGSEA(prot.paired.giltdec.vs.gilt, "Gilteritinib-vs-Gilteritinib & Decitabine", width = 15)
 
 ```
 
@@ -191,30 +217,13 @@ With a logarithmic scale we collect the adjusted p-values of each normalized enr
 Note the GSEA plot shows only the top 20 most enriched gene sets among those 
 with an adjusted p-value below 0.05.
 
-### Healthy vs Treated
-
-We compare the healthy donor samples to all Treated samples.
-Red indicates increased activity in treated samples, while blue shows increased activity
-in healthy samples.
-
-```{r Treated vs Healthy}
-show <- prot.diffex.treated %>%
-  select(-featureID, -t, -B) %>% head(.)
-kbl(show) %>%
-  kable_paper("hover", full_width = F)
-```
-
-```{r, include=TRUE, fig.align="center"}
-knitr::include_graphics("sig-includedHealthy-vs-Treated-gseaGO-plot.png")
-```
-
 ### Healthy vs Pre-Treatment
 
-Next, we compare healthy samples to Pre-Treatment samples.
+We compare the healthy donor samples to the Pre-Treatment samples.
 Red indicates increased activity in Pre-Treatment samples, while blue shows increased activity
 in healthy samples.
 
-```{r Pre-Treatment vs Healthy}
+```{r Healthy vs Pre-Treatment}
 show <- prot.diffex.pre %>%
   select(-featureID, -t, -B) %>% head(.)
 kbl(show) %>%
@@ -225,71 +234,77 @@ kbl(show) %>%
 knitr::include_graphics("sig-includedHealthy-vs-Pre-Treatment-gseaGO-plot.png")
 ```
 
-### Healthy vs Treated Early
+### Healthy vs Gilterinib
 
-Next, we compare healthy samples to Treated early samples.
-Red indicates increased activity in Treated early samples, while blue shows increased activity
+Next, we compare healthy samples to Gilteritinib treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
 in healthy samples.
 
-```{r Treated early vs Healthy}
-show <- prot.diffex.early %>%
+```{r Healthy vs Gilterinib}
+show <- prot.diffex.gilt %>%
   select(-featureID, -t, -B) %>% head(.)
 kbl(show) %>%
   kable_paper("hover", full_width = F)
 ```
 
 ```{r, include=TRUE, fig.align="center"}
-knitr::include_graphics("sig-includedHealthy-vs-Treated, early-period-gseaGO-plot.png")
+knitr::include_graphics("sig-includedHealthy-vs-Gilterinib-gseaGO-plot.png")
 ```
 
-### Healthy vs Treated Late
+### Healthy vs Gilteritinib + Decitabine
 
-Next, we compare healthy samples to Treated late samples.
-Red indicates increased activity in Treated late samples, while blue shows increased activity
+Next, we compare healthy samples to Gilteritinib + Decitabine treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib +Decitabine group.
+Red indicates increased activity in Gilteritinib + Decitabine samples, while blue shows increased activity
 in healthy samples.
 
-```{r Treated late vs Healthy}
-show <- prot.diffex.late %>%
+```{r Healthy vs Gilteritinib + Decitabine}
+show <- prot.diffex.gilt.dec %>%
   select(-featureID, -t, -B) %>% head(.)
 kbl(show) %>%
   kable_paper("hover", full_width = F)
 ```
 
 ```{r, include=TRUE, fig.align="center"}
-knitr::include_graphics("sig-includedHealthy-vs-Treated, late-period-gseaGO-plot.png")
+knitr::include_graphics("sig-includedHealthy-vs-Gilterinib & Decitabine-gseaGO-plot.png")
 ```
 
-### Pre-Treatment vs Treated Early
+### Pre-Treatment vs Gilteritinib
 
-Finally, we compare Pre-Treatment samples to Treated early samples.
-Red indicates increased activity in Treated early samples, while blue shows increased activity
+Next, we compare Pre-Treatment samples to Gilteritinib. 
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+The differential expression table is the result of paired sample t-tests.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
 in Pre-Treatment samples.
 
-```{r Early vs Pre-Treatment}
-show <- prot.diffex.earlyvspre %>%
+```{r Pre-Treatment vs Gilteritinib}
+show <- prot.paired.gilt.vs.pre %>%
   select(-featureID, -t, -B) %>% head(.)
 kbl(show) %>%
   kable_paper("hover", full_width = F)
 ```
 
 ```{r, include=TRUE, fig.align="center"}
-knitr::include_graphics("sig-includedPre-Treatment-vs-Early-gseaGO-plot.png")
+knitr::include_graphics("sig-includedPre-Treatment-vs-Gilteritinib-gseaGO-plot.png")
 ```
 
-### Early vs Late
+### Gilteritinib vs Gilteritinib + Decitabine
 
-Finally, we compare the treated Early samples to the treated Late samples.
-Red indicates increased activity in Treated late samples, while blue shows increased activity
-in Pre-Treatment samples.
+Finally, we compare Gilteritinib samples to Gilteritinib + Decitabine samples. 
+To avoid over-representing any patient, we choose the earliest sample per patient for both the groups.
+The Gilteritinib group in this comparison comprises only patients with a corresponding Gilteritinib + Decitabine sample,
+and differential expression table is the result of paired sample t-tests.
+Red indicates increased activity in Gilteritinib + Decitabine samples, while blue shows increased activity
+in Gilteritinib samples.
 
-```{r Late vs Early}
-show <- prot.diffex.latevsearly %>%
+```{r Gilteritinib vs Gilteritinib + Decitabine}
+show <- prot.paired.giltdec.vs.gilt %>%
   select(-featureID, -t, -B) %>% head(.)
 kbl(show) %>%
   kable_paper("hover", full_width = F)
 ```
 
 ```{r, include=TRUE, fig.align="center"}
-knitr::include_graphics("sig-includedEarly-vs-Late-gseaGO-plot.png")
+knitr::include_graphics("sig-includedGilteritinib-vs-Gilteritinib & Decitabine-gseaGO-plot.png")
 ```
-

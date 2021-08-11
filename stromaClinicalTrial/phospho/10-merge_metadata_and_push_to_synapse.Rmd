@@ -48,6 +48,7 @@ print(head(meta.tab))
 tables <- list()
 
 for (i in 1:length(tables.syn)){
+  print(i)
   name <- names(tables.syn)[[i]]
   crosstab.syn <- tables.syn[[i]]
   mat <- read.csv(syn$get(crosstab.syn)$path,sep='\t',header=T)
@@ -73,4 +74,3 @@ for (name in names(tables.syn)){
   synTableStore(mat,name,parentId='syn22128879')
 }
 ```
-
