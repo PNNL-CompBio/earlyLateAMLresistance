@@ -1,7 +1,7 @@
 ---
-title: "Sunil Ex17 Pathway + Kinase heatmaps"
+title: "Sunil Ex17 Kinase heatmaps"
 author: "Camilo Posso"
-date: "07/06/2021"
+date: "08/17/2021"
 output: 
   html_document:
     code_folding: hide
@@ -15,94 +15,91 @@ knitr::opts_chunk$set(echo = TRUE)
 ### Metadata
 
 ```{r libraries and setup, include=FALSE}
-library(kableExtra)
 library(amlresistancenetworks)
-library(stats)
-library(ggplot2)
-library(gridExtra)
+library(kableExtra)
 library(dplyr)
 library(readr)
-source("../Util/synapseUtil.R")
-
-####### Make sure to run the corresponding script to make the plots. It is in the Making Plots folder.
+library(readxl)
+source("../../Util/synapseUtil.R")
 
 # corrected for loading mass and plexID, long time and subtle
-p.site.corrected <- querySynapseTable("syn25706631")
+p.site.corrected <- querySynapseTable("syn26047149")
 
 phos.dat <- p.site.corrected
 phos.dat$Peptide <- sub("^.*@(.*)$", "\\1", phos.dat$Accession)
 phos.dat$site <- sub("^(.*)@.*$", "\\1", phos.dat$Accession)
 phos.dat$Gene <- sub("(.*)-.*$", "\\1", phos.dat$site)
 
-# from here we can select just the metadata of interest
-metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
-summary <- phos.dat%>%
-  select(metadata.columns)%>%
-  distinct()
-summary$Description <- as.character(summary$Description)
-summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
-                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
-summary[is.na(summary$Type), "Type"] <- "Treated"
+## We have the metadata selected from the long form table
+summary <- p.site.corrected[p.site.corrected$Accession == "AAK1-T606t@K.VQTT*PPPAVQGQK.V", 
+                            c("Sample", "BeatAML Patient ID", 
+                              "Plex", "Loading Mass", "Description", 
+                              "Period", "Treatment")]
 
-## Elie has corrected the time period annotation. Adding a pre-treatment, early, and late period.
-correct.time.annotation <- as.data.frame(read_csv("../Updated time period annotation.csv"))
-summary$Period <- correct.time.annotation[summary$Sample, "Classification"]
-summary$Period <- case_when(grepl("early", summary$Period) ~ "Early",
-                            grepl("Late", summary$Period) ~ "Late",
-                            grepl("pre-treatment", summary$Period) ~ "Pre-Treatment")
+rownames(summary) <- summary$Sample
+
+## Organizing time points into the right order (not alphanumeric)
+time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cycle 2 Day 28", "P2 Cycle 3 Day 28", 
+                 "P1B Cycle 1 Day 1", "P1B Cycle 1 Day 28", "P1B Cycle 2 Day 28", "P1B Cycle 3 Day 28", "P1B Cycle 6 Day 28",
+                 "P1B Cycle 9 Day 28", "P1B Conc Cycle 9 Day 28") %>%
+  factor(.)
+
+
+summary$Description <- factor(summary$Description, levels = time.points)
+summary <- summary[sort(summary$Sample), ]
+summary$`BeatAML Patient ID` <- factor(summary$`BeatAML Patient ID`, levels = unique(summary$`BeatAML Patient ID`))
+summary$Treatment <- make.names(summary$Treatment)
 ```
 
 Below we show only the metadata for the 7 patients.
 
 ```{r metadata, echo=FALSE}
-
-show <- subset(summary, Type == "Treated") %>%
-  select(`BeatAML Patient ID`, Period, Plex, Description) %>%
-  dplyr::rename(ID = `BeatAML Patient ID`) %>%
-  arrange(ID, Period) %>%
-  mutate(Plex = as.character(Plex))
-
+show <- summary
 kbl(show) %>%
-  kable_paper("hover", full_width = F)
+  kable_paper("hover", full_width = T)
 
 ```
 
-### KSEA Heatmap Early vs Pre-Treatment - Phosphosite Plus + NetworKIN
+### KSEA Heatmaps Gilteritinib vs Pre-treatment
+ 
+Six of the seven patients have both a Pre-treatment and Gilteritinib sample. From these 6 patients,
+We have a total of 6 Pre-Treatment samples (one per patient), each with a single corresponding Gilteritinib sample, except
+patient 5145, who has 2 Gilteritinib samples.
 
-Six of the seven patients have both a Pre-treatment and Early time point. From these 6 samples, 3 consist 
-of only two time points (Pre-treatment and Early) while the other 3 have multiple Early time points. 
-We use these 6 patients to run KSEA (using the Phosphosite Plus + NetworKIN database) to compare the Early period 
-to the Pre-Treatment period for each sample. After collecting these enrichment results, we re-adjust 
+We use these 6 patients to run KSEA to compare the Pre-Treatment group to the Gilteritinib group on a per patient basis.
+After collecting these enrichment results, we re-adjust 
 the p-values using "BH" (Benjamini Hochberg) correction. We select only the top 50 most enriched
-pathways and select those with an adjusted p-value below 0.05. 
+kinases and select those with an adjusted p-value below 0.05. 
 
-In these plots, red indicates increased activity in the Early period, while blue shows increased
-activity in the Pre-Treatment period. Moreover, the asterisk indicates an adjusted p-value below 0.05 for 
-that particular patient + pathway.
+In these plots, red indicates increased activity in the Gilteritinib, while blue shows increased
+activity in the Pre-Treatment group. Moreover, the asterisk indicates an adjusted p-value below 0.05 for 
+that particular patient + kinases.
 
-We use the z-score for each pathway + patient combination in the heatmap.
+We use the z-score for each kinase + patient combination in the heatmap.
 
-```{r fig.show='hold', fig.align='center', fig.cap=c("LEFT: Phosphosite Plus ---- RIGHT: Phosphosite Plus & NetworKIN")}
-knitr::include_graphics("Making Plots/Kinase heatmap Early vs Pre-Treatment - Phosphosite Plus + NetworKIN.png")
+```{r fig.show='hold', fig.align='center', fig.cap=c("Phosphosite Plus & NetworKIN")}
+knitr::include_graphics("Making Plots/Kinase heatmap Gilteritinib vs Pre-Treatment - Phosphosite Plus + NetworKIN.png")
 ```
 
-### KSEA Heatmap Late vs Early - Phosphosite Plus + NetworKIN
+### KSEA Heatmaps Gilteritinib + Decitabine vs Gilteritinib
 
-Only two of the seven patients have a late time point, namely "5029" and "5104". "5029" consists of only two
-time points, while "5104" has a total 6; however 1 of these 6 time points corresponds to the Pre-Treatment period.
-We use these 2 patients to run KSEA (using the Phosphosite Plus + NetworKIN database) to compare the Late period 
-to the Early period for each sample. After collecting these enrichment results, we re-adjust 
+Only three of the seven patients have a Gilteritinib + Decitabine sample, namely "5029", "5104" and "5174". 
+Patients "5029" and "5104" both have one sample for each of the Gilteritinib and Gilteritinib + Decitabine groups, 
+while "5104" has one Gilteritinib and 4 Gilteritinib + Decitabine sample.
+
+We use these 3 patients to run KSEA to compare the Late period 
+to the Early period for each patient. After collecting these enrichment results, we re-adjust 
 the p-values using "BH" (Benjamini Hochberg) correction. We select only the top 50 most enriched
-pathways and select those with an adjusted p-value below 0.05. 
+kinases and select those with an adjusted p-value below 0.05. 
 
-In these plots, red indicates increased activity in the Late period, while blue shows increased
-activity in the Early period. Moreover, the asterisk indicates an adjusted p-value below 0.05 for 
-that particular patient + pathway.
+In these plots, red indicates increased activity in the Gilteritinib + Decitabine group, while blue shows increased
+activity in the Gilteritinib group. Moreover, the asterisk indicates an adjusted p-value below 0.05 for 
+that particular patient + kinase.
 
-We use the z-score for each pathway + patient combination in the heatmap. 
+We use the z-score for each kinase + patient combination in the heatmap.
 
-```{r fig.show='hold', fig.align='center', fig.cap=c("LEFT: KEGG ---- RIGHT: REACTOME")}
-knitr::include_graphics("Making Plots/Kinase heatmap Late vs Early - Phosphosite Plus + NetworKIN.png")
+```{r fig.show='hold', fig.align='center', fig.cap=c("Phosphosite Plus & NetworKIN")}
+knitr::include_graphics("Making Plots/Kinase heatmap Gilteritinib + Decitabine vs Gilteritinib - Phosphosite Plus + NetworKIN.png")
 ```
 
 

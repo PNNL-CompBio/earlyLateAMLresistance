@@ -1,7 +1,7 @@
 ---
 title: "Sunil Ex17 Phospho Correlation Enrichment"
 author: "Camilo Posso"
-date: "06/22/2021"
+date: "08/17/2021"
 output: 
   html_document:
     code_folding: hide
@@ -15,45 +15,29 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r libraries, include=FALSE}
+library(amlresistancenetworks)
 library(leapr)
 library(kableExtra)
-library(amlresistancenetworks)
-library(stats)
-library(ggplot2)
-library(gridExtra)
 library(dplyr)
 library(readr)
+library(readxl)
 source("../../Util/synapseUtil.R")
 
 # corrected for loading mass and plexID, long time and subtle
-p.site.corrected <- querySynapseTable("syn25706631")
+p.site.corrected <- querySynapseTable("syn26047149")
 
 phos.dat <- p.site.corrected
 phos.dat$Peptide <- sub("^.*@(.*)$", "\\1", phos.dat$Accession)
 phos.dat$site <- sub("^(.*)@.*$", "\\1", phos.dat$Accession)
 phos.dat$Gene <- sub("(.*)-.*$", "\\1", phos.dat$site)
 
-# from here we can select just the metadata of interest
-metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
-summary <- phos.dat%>%
-  select(metadata.columns)%>%
-  distinct()
-summary$Description <- as.character(summary$Description)
-summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
-                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
-summary[is.na(summary$Type), "Type"] <- "Treated"
-rownames(summary) <- as.numeric(summary$Sample)
-summary <- summary %>%
-  mutate(Sample.numeric = as.numeric(Sample)) %>%
-  arrange(Sample)
+## We have the metadata selected from the long form table
+summary <- p.site.corrected[p.site.corrected$Accession == "AAK1-T606t@K.VQTT*PPPAVQGQK.V", 
+                            c("Sample", "BeatAML Patient ID", 
+                              "Plex", "Loading Mass", "Description", 
+                              "Period", "Treatment")]
 
-## Elie has corrected the time period annotation. Adding a pre-treatment, early, and late period.
-correct.time.annotation <- as.data.frame(read_csv("../Updated time period annotation.csv"))
-summary$Period <- correct.time.annotation[summary$Sample, "Classification"]
-summary$Period <- case_when(grepl("early", summary$Period) ~ "Early",
-                            grepl("Late", summary$Period) ~ "Late",
-                            grepl("pre-treatment", summary$Period) ~ "Pre-Treatment")
-rownames(summary) <- as.numeric(summary$Sample)
+rownames(summary) <- summary$Sample
 
 ## Organizing time points into the right order (not alphanumeric)
 time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cycle 2 Day 28", "P2 Cycle 3 Day 28", 
@@ -61,7 +45,11 @@ time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cy
                  "P1B Cycle 9 Day 28", "P1B Conc Cycle 9 Day 28") %>%
   factor(.)
 
+
 summary$Description <- factor(summary$Description, levels = time.points)
+summary <- summary[sort(summary$Sample), ]
+summary$`BeatAML Patient ID` <- factor(summary$`BeatAML Patient ID`, levels = unique(summary$`BeatAML Patient ID`))
+summary$Treatment <- make.names(summary$Treatment)
 ```
 
 
@@ -101,8 +89,7 @@ We access synapse to load the data in long form. We use data which has been corr
 Loading mass effect, as well as plex effect. Below we see a metadata table for this experiment.
 
 ```{r pressure, echo=FALSE}
-show <- summary %>%
-  select(-`BeatAML Patient ID`)
+show <- summary
 kbl(show) %>%
   kable_paper("hover", full_width = T)
 ```
@@ -113,37 +100,31 @@ treated & late groups.
 
 ```{r prepare ratios and limma, eval=FALSE, include=FALSE}
 ##select the samples of interest
-earliest.samples <- subset(summary, Period == "Early") %>%
+healthy <- subset(summary, `BeatAML Patient ID` == 'Healthy Donor Stroma')
+
+pre.treatment <- subset(summary, Period == "Pre-Treatment")
+
+## Earliest sample, per patient, which has been treated with GILT
+treated.gilt <- subset(summary, Treatment == "GILT") %>%
+  filter(`BeatAML Patient ID` != "5029") %>%
   group_by(`BeatAML Patient ID`) %>%
   slice(1)
 
-healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
-  select(Sample)%>%
-  unique()
-
-treated.late <- subset(summary, Period == "Late")%>%
-  select(Sample)%>%
-  unique()
-
-### Choosing earliest time point
-treated.early <- subset(summary, Period == "Early") %>%
+## Earliest sample, per patient, which has been treated with GILT + DEC
+treated.gilt.and.dec <- subset(summary, Treatment == "GILT...DEC") %>%
   group_by(`BeatAML Patient ID`) %>%
-  slice(1) %>%
-  ungroup(`BeatAML Patient ID`) %>%
-  select(Sample) %>%
-  unique()
+  slice(1)
 
-treated.pre <- subset(summary, Period == "Pre-Treatment") %>%
-  select(Sample) %>%
-  unique()
+## Gilteritinib samples with Gilt + Dec counterpart in same patient
+treated.gilt.restricted <- subset(summary, Treatment == "GILT") %>%
+  filter(`BeatAML Patient ID` %in% treated.gilt.and.dec$`BeatAML Patient ID`)
 
-### Choosing earliest time point
-treated <- subset(summary, Type == 'Treated')%>%
-  group_by(`BeatAML Patient ID`) %>%
-  slice(1) %>%
-  ungroup(`BeatAML Patient ID`) %>%
-  select(Sample)%>%
-  unique()
+##then we spread the proteomics data into a matrix
+phos.mat <- phos.dat%>%
+  select(LogRatio, Sample, site)%>%
+  tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
+                      values_fn=list(LogRatio=mean))%>%
+  tibble::column_to_rownames('site')
 
 gene.to.site<-dplyr::select(phos.dat,Gene,site,Peptide)%>%distinct()%>%
     dplyr::mutate(residue=stringr::str_replace(site,paste0(Gene,'-'),''))%>%
@@ -165,7 +146,7 @@ phos.dat.single.site <- merge(phos.dat, single.residues)
 phos.mat <- phos.dat.single.site %>%
   select(LogRatio, Sample, `single site`, site) %>%
   tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
-                      values_fn=list(LogRatio=mean),values_fill=0.0) %>%
+                      values_fn=list(LogRatio=mean)) %>%
   mutate(count = rep(1,nrow(.))) 
 
 single.site <- phos.mat$`single site`
@@ -175,6 +156,7 @@ single.site <- phos.mat$`single site`
 # Prior to correlation enrichment is roughly the same, and much easier.
 
 # Average duplicate phosphosites (duplicates arise from splitting compound sites, eg GENE-S123S125).
+# Function rowsum is adding column-wise according to grouping in single.site.
 phos.mat <- phos.mat %>%
   select(everything(),-`single site`, -site) %>%
   rowsum(single.site) %>%
@@ -195,36 +177,13 @@ background average correlation among genes is significant.
 
 $$\\[.2in]$$
 
-### Healthy vs Treated
-
-Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
-databases. We're comparing the healthy donor samples to all treated samples. 
-Red indicates increased activity in treated samples, while blue shows increased activity
-in healthy samples. 
-
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated")}
-knitr::include_graphics("sig-includedHealthy-vs-Treated-ksea-plot.png")
-```
-
-### Correlation Enrichment
-
-Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Treated samples on the right. Kinases with higher enrichment score indicate more 
-concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases when
-computing these results. Note that color does not have any
-meaning in correlation enrichment.
-
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated",fig.show='hold',fig.align='center'}
-knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png",
-                          "sig-included-Treated-correlation-enrichment-plot.png"))
-``` 
-
-$$\\[.2in]$$
 
 ### Healthy vs Pre-Treatment
 
-Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
-databases. We're comparing the healthy donor samples to Pre-Treatment samples. 
+#### KSEA
+
+Below we have a KSEA plot computed using the Phosphosite Plus + NetworKIN pathway
+database. We're comparing the healthy donor samples to Pre-Treatment samples. 
 Red indicates increased activity in Pre-Treatment samples, while blue shows increased activity
 in healthy samples. 
 
@@ -232,113 +191,163 @@ in healthy samples.
 knitr::include_graphics("sig-includedHealthy-vs-Pre-Treatment-ksea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Pre-Treatment samples on the right. Kinases with higher enrichment score indicate more 
-concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases when
-computing these results. Note that color does not have any
+as well as Pre-Treatment samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
+
 
 ```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Pre-Treatment",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png",
                           "sig-included-Pre-Treatment-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[.2in]$$
+$$\\[0.2in]$$
 
+### Healthy vs Gilteritinib
 
-### Healthy vs Treated Early
+#### KSEA
 
-Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
-databases. We're comparing the healthy donor samples to the early period treated samples. 
-Red indicates increased activity in early period treated samples, while blue shows increased activity
-in healthy samples. 
+Below we have a KSEA plot computed using the Phosphosite Plus + NetworKIN pathway
+database. We compare healthy samples to Gilteritinib treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
+in healthy samples.
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Early")}
-knitr::include_graphics("sig-includedHealthy-vs-Treated-early-ksea-plot.png")
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Gilteritinib")}
+knitr::include_graphics("sig-includedHealthy-vs-Gilterinib-ksea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Early period treated samples on the right. Kinases with higher enrichment score indicate more 
-concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases when
-computing these results. Note that color does not have any
+as well as Gilteritinib samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early period",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Gilteritinib",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png",
-                          "sig-included-Treated Early-correlation-enrichment-plot.png"))
+                          "sig-included-Gilteritinib-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[.2in]$$
+$$\\[0.2in]$$
 
-### Treated Early vs Pre-Treatment
+### Healthy vs Gilteritinib + Decitabine
 
-Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
-databases. We're comparing the Pre-Treatment samples to Treated early samples. 
-Red indicates increased activity in Treated Early samples, while blue shows increased activity
-in Pre-Treated samples. 
+#### KSEA
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Treated Early")}
-knitr::include_graphics("sig-includedPre-Treatment-vs-Early-ksea-plot.png")
+Below we have a KSEA plot computed using the Phosphosite Plus + NetworKIN pathway
+database. Next, we compare healthy samples to Gilteritinib + Decitabine treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib Decitabine group.
+Red indicates increased activity in Gilteritinib Decitabine samples, while blue shows increased activity
+in healthy samples.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Gilteritinib Decitabine")}
+knitr::include_graphics("sig-includedHealthy-vs-Gilterinib & Decitabine-ksea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
+
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Gilteritinib + Decitabine samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
+meaning in correlation enrichment.
+
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Gilteritinib Decitabine",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Healthy-correlation-enrichment-plot.png",
+                          "sig-included-Gilteritinib Decitabine-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[0.2in]$$
+
+### Pre-Treatment vs Gilteritinib
+
+#### KSEA
+
+Below we have a KSEA plot computed using the Phosphosite Plus + NetworKIN pathway
+database. Next, we compare Pre-Treatment samples to Gilteritinib treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
+in Pre-Treatment.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Gilteritinib")}
+knitr::include_graphics("sig-includedPre-Treatment-vs-Gilteritinib-ksea-plot.png")
+```
+
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Pre-Treatment samples on the left, 
-as well as Treated Early samples on the right. Kinases with higher enrichment score indicate more 
-concordance among the genes in that Kinase. We use the PhosphoSitePlus + NetworKIN databases in
-computing these results. Note that color does not have any
+as well as Gilteritinib samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Treated Early",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Gilteritinib",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-Pre-Treatment-correlation-enrichment-plot.png",
-                          "sig-included-Treated Early-correlation-enrichment-plot.png"))
+                          "sig-included-Gilteritinib-correlation-enrichment-plot.png"))
 ``` 
 
 $$\\[.2in]$$
 
-### Treated Late vs Treated Early
+### Gilteritinib vs Gilteritinib + Decitabine
 
-Below we have a KSEA plot computed using the PhosphoSitePlus + NetworKIN
-databases. We're comparing the Treated early samples to Treated late samples. 
-Red indicates increased activity in Treated late samples, while blue shows increased activity
-in Treated early samples. 
+#### KSEA
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
-knitr::include_graphics("sig-includedEarly-vs-Late-ksea-plot.png")
+Below we have a KSEA plot computed using the Phosphosite Plus + NetworKIN pathway
+database. Next, we compare Gilteritinib samples to Gilteritinib + Decitabine treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient in both groups.
+The Gilteritinib group in this comparison comprises only patients with a corresponding Gilteritinib + Decitabine sample.
+Red indicates increased activity in Gilteritinib + Decitabine samples, while blue shows increased activity
+in Gilteritinib samples.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Gilteritinib vs Gilteritinib + Decitabine")}
+knitr::include_graphics("sig-includedGilteritinib-vs-Gilteritinib & Decitabine-ksea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
-As we have only two treated late samples, we cannot compute correlation enrichment results
-for the treated late samples, as the correlation will always be 1.
+Below we show the correlation enrichment in Gilteritinib samples on the left, 
+as well as Gilteritinib + Decitabine samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
+meaning in correlation enrichment.
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Gilteritinib - Right: Gilteritinib + Decitabine",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Gilteritinib Restricted-correlation-enrichment-plot.png",
+                          "sig-included-Gilteritinib Decitabine-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[.2in]$$
 
 
 [comment]: # (Below is the code to produce the enrichment correlation plots seen in this markdown)
 
 ```{r enrichment correlation, eval=FALSE, include=FALSE}
-
+set.seed(117)
 enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = phos.mat[, healthy$Sample], 
                                                             prefix = "Healthy", pathway.plot.size = 4, 
-                                                            geneset = kinasesubstrates, corr.cutoff = 0.1,
-                                                            clean.names = FALSE)
-
-enrichment.correlation.treated <- plotCorrelationEnrichment(exprs = phos.mat[,treated$Sample], 
-                                                            prefix = "Treated", pathway.plot.size = 4,
-                                                            geneset = kinasesubstrates, corr.cutoff = 0.1,
-                                                            clean.names = FALSE)
-
-enrichment.correlation.early <- plotCorrelationEnrichment(exprs = phos.mat[, treated.early$Sample], 
-                                                          prefix = "Treated Early", pathway.plot.size = 4,
-                                                          geneset = kinasesubstrates, corr.cutoff = 0.1,
-                                                          clean.names = FALSE)
-
-enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = phos.mat[, treated.pre$Sample], 
+                                                            geneset = kinasesubstrates, corr.cutoff = 0.4,
+                                                            clean.names = FALSE, height = 12)
+set.seed(117)
+enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = phos.mat[,pre.treatment$Sample], 
                                                         prefix = "Pre-Treatment", pathway.plot.size = 4,
-                                                        geneset = kinasesubstrates, corr.cutoff = 0.1,
-                                                        clean.names = FALSE)
-
+                                                        geneset = kinasesubstrates, corr.cutoff = 0.4,
+                                                        clean.names = FALSE, height = 12)
+set.seed(117)
+enrichment.correlation.treated.gilt <- plotCorrelationEnrichment(exprs = phos.mat[,treated.gilt$Sample], 
+                                                                 prefix = "Gilteritinib", pathway.plot.size = 4,
+                                                                 geneset = kinasesubstrates, corr.cutoff = 0.4,
+                                                                 clean.names = FALSE, height = 12)
+set.seed(117)
+enrichment.correlation.treated.giltdec <- plotCorrelationEnrichment(exprs = phos.mat[, treated.gilt.and.dec$Sample], 
+                                                                    prefix = "Gilteritinib Decitabine", pathway.plot.size = 4,
+                                                                    geneset = kinasesubstrates, corr.cutoff = 0.4,
+                                                                    clean.names = FALSE, height = 12)
+set.seed(117)
+enrichment.correlation.treated.gilt.restricted <- plotCorrelationEnrichment(exprs = phos.mat[, treated.gilt.restricted$Sample], 
+                                                                            prefix = "Gilteritinib Restricted", 
+                                                                            pathway.plot.size = 4,
+                                                                            geneset = kinasesubstrates, corr.cutoff = 0.4,
+                                                                            clean.names = FALSE, height = 12)
 ```
