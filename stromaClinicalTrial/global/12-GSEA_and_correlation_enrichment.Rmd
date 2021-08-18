@@ -1,7 +1,7 @@
 ---
 title: "Sunil Ex17 Global Correlation Enrichment"
 author: "Camilo Posso"
-date: "06/22/2021"
+date: "08/17/2021"
 output: 
   html_document:
     code_folding: hide
@@ -14,33 +14,22 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r Setup libraries, include=FALSE}
 library(amlresistancenetworks)
-library(dplyr)
 library(kableExtra)
-library(leapr)
+library(dplyr)
 library(readr)
+library(readxl)
+library(limma)
 source("../../Util/synapseUtil.R")
 
 # corrected for loading mass and plexID, long time and subtle
-g.gene.corrected <- querySynapseTable("syn25706561")
+g.gene.corrected <- querySynapseTable("syn26047126")
 
 prot.dat <- g.gene.corrected
 
-# from here we can select just the metadata of interest
-metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
-summary <- prot.dat%>%
-  select(metadata.columns)%>%
-  distinct()
-summary$Description <- as.character(summary$Description)
-summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
-                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
-summary[is.na(summary$Type), "Type"] <- "Treated"
-
-## Updated time period annotation. Adding a pre-treatment, early, and late period.
-correct.time.annotation <- as.data.frame(read_csv("../Updated time period annotation.csv"))
-summary$Period <- correct.time.annotation[summary$Sample, "Classification"]
-summary$Period <- case_when(grepl("early", summary$Period) ~ "Early",
-                            grepl("Late", summary$Period) ~ "Late",
-                            grepl("pre-treatment", summary$Period) ~ "Pre-Treatment")
+## We have the metadata selected from the long form table
+summary <- g.gene.corrected[1:40, c("Sample", "BeatAML Patient ID", "Plex", 
+                                    "Loading Mass", "Description", "Period", "Treatment")]
+rownames(summary) <- summary$Sample
 
 ## Organizing time points into the right order (not alphanumeric)
 time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cycle 2 Day 28", "P2 Cycle 3 Day 28", 
@@ -48,17 +37,20 @@ time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cy
                  "P1B Cycle 9 Day 28", "P1B Conc Cycle 9 Day 28") %>%
   factor(.)
 
+
 summary$Description <- factor(summary$Description, levels = time.points)
+summary <- summary[sort(summary$Sample), ]
+summary$`BeatAML Patient ID` <- factor(summary$`BeatAML Patient ID`, levels = unique(summary$`BeatAML Patient ID`))
+summary$Treatment <- make.names(summary$Treatment)
 ```
 
-## Get dataset
+## Introduction
 
 We access synapse to load the data in long form. We use data which has been corrected for both
 Loading mass effect, as well as plex effect. Below we see a metadata table for this experiment.
 
 ```{r metadata, echo=FALSE}
-show <- summary %>%
-  select(-`BeatAML Patient ID`)
+show <- summary
 kbl(show) %>%
   kable_paper("hover", full_width = T)
 
@@ -66,42 +58,27 @@ kbl(show) %>%
 
 ```{r prepare groups and matrix, include=FALSE}
 ##select the samples of interest
-earliest.samples <- subset(summary, Period == "Early") %>%
+healthy <- subset(summary, `BeatAML Patient ID` == 'Healthy Donor Stroma')
+
+pre.treatment <- subset(summary, Period == "Pre-Treatment")
+
+## Earliest sample, per patient, which has been treated with GILT
+treated.gilt <- subset(summary, Treatment == "GILT") %>%
+  filter(`BeatAML Patient ID` != "5029") %>%
   group_by(`BeatAML Patient ID`) %>%
   slice(1)
 
-healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
-  select(Sample)%>%
-  unique()
-
-treated.late <- subset(summary, Period == "Late")%>%
-  select(Sample)%>%
-  unique()
-
-treated.early <- subset(summary, Period == "Early") %>%
+## Earliest sample, per patient, which has been treated with GILT + DEC
+treated.gilt.and.dec <- subset(summary, Treatment == "GILT...DEC") %>%
   group_by(`BeatAML Patient ID`) %>%
-  slice(1) %>%
-  ungroup(`BeatAML Patient ID`) %>%
-  select(Sample) %>%
-  unique()
-
-treated.pre <- subset(summary, Period == "Pre-Treatment") %>%
-  select(Sample) %>%
-  unique()
-
-treated <- subset(summary, Type == 'Treated')%>%
-  group_by(`BeatAML Patient ID`) %>%
-  slice(1) %>%
-  ungroup(`BeatAML Patient ID`) %>%
-  select(Sample)%>%
-  unique()
+  slice(1)
 
 ##then we spread the proteomics data into a matrix
 colnames(prot.dat)[[1]] <- "Gene"
 prot.mat <- prot.dat%>%
   select(LogRatio,Sample,Gene)%>%
   tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
-                      values_fn=list(LogRatio=mean),values_fill=0.0)%>%
+                     values_fn=list(LogRatio=mean))%>%
   tibble::column_to_rownames('Gene')
 ```
 
@@ -121,32 +98,10 @@ We split the report according to which database we use to perform the analysis.
 
 ## Using KEGG
 
-### Healthy vs Treated GSEA
 
-Below we have a GSEA plot computed using the KEGG pathway
-database. We're comparing the healthy donor samples to all treated samples. 
-Red indicates increased activity in treated samples, while blue shows increased activity
-in healthy samples. 
+### Healthy vs Pre-Treatment
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated")}
-knitr::include_graphics("sig-includedkegg Healthy vs Treated-gsea-plot.png")
-```
-
-### Correlation Enrichment
-
-Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Treated samples on the right. Pathways with higher enrichment score indicate more 
-concordance among the genes in that pathway. Note that color does not have any
-meaning in correlation enrichment.
-
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated",fig.show='hold',fig.align='center'}
-knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot.png",
-                          "sig-included-Kegg Treated-correlation-enrichment-plot.png"))
-``` 
-
-$$\\[0.2in]$$
-
-### Healthy vs Pre-Treatment GSEA
+#### GSEA
 
 Below we have a GSEA plot computed using the KEGG pathway
 database. We're comparing the healthy donor samples to Pre-Treatment samples. 
@@ -157,7 +112,7 @@ in healthy samples.
 knitr::include_graphics("sig-includedkegg Healthy vs Pre-Treatment-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Healthy samples on the left, 
 as well as Pre-Treatment samples on the right. Pathways with higher enrichment score indicate more 
@@ -172,105 +127,129 @@ knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot
 
 $$\\[0.2in]$$
 
-### Healthy vs Treated Early GSEA
+### Healthy vs Gilteritinib
+
+#### GSEA
 
 Below we have a GSEA plot computed using the KEGG pathway
-database. We're comparing the healthy donor samples to early period treated samples. 
-Red indicates increased activity in early treated samples, while blue shows increased activity
-in healthy samples. 
+database. We compare healthy samples to Gilteritinib treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
+in healthy samples.
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Early period")}
-knitr::include_graphics("sig-includedkegg Healthy vs Treated Early-gsea-plot.png")
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Gilteritinib")}
+knitr::include_graphics("sig-includedkegg Healthy vs Gilteritinib-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Early period treated samples on the right. Pathways with higher enrichment score indicate more 
+as well as Gilteritinib samples on the right. Pathways with higher enrichment score indicate more 
 concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Gilteritinib",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot.png",
-                          "sig-included-Kegg Treated Early-correlation-enrichment-plot.png"))
+                          "sig-included-Kegg Gilteritinib-correlation-enrichment-plot.png"))
 ``` 
 
 $$\\[0.2in]$$
 
-### Pre-Treatment vs Treated Early GSEA
+### Healthy vs Gilteritinib + Decitabine
+
+#### GSEA
 
 Below we have a GSEA plot computed using the KEGG pathway
-database. We're comparing the Pre-Treatment samples to Treated Early samples. 
-Red indicates increased activity in Treated early samples, while blue shows increased activity
-in Pre-Treatment samples. 
+database. Next, we compare healthy samples to Gilteritinib + Decitabine treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib Decitabine group.
+Red indicates increased activity in Gilteritinib Decitabine samples, while blue shows increased activity
+in healthy samples.
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Treated Early")}
-knitr::include_graphics("sig-includedkegg Pre-Treatment vs Treated Early-gsea-plot.png")
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Gilteritinib Decitabine")}
+knitr::include_graphics("sig-includedkegg Healthy vs Gilteritinib Decibatine-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
+
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Gilteritinib + Decitabine samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
+meaning in correlation enrichment.
+
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Gilteritinib Decitabine",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Kegg Healthy-correlation-enrichment-plot.png",
+                          "sig-included-Kegg Gilteritinib Decitabine-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[0.2in]$$
+
+### Pre-Treatment vs Gilteritinib
+
+#### GSEA
+
+Below we have a GSEA plot computed using the KEGG pathway
+database. Next, we compare Pre-Treatment samples to Gilteritinib treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
+in Pre-Treatment.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Gilteritinib")}
+knitr::include_graphics("sig-includedkegg Pre-Treatment vs Gilteritinib-gsea-plot.png")
+```
+
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Pre-Treatment samples on the left, 
-as well as Treated Early samples on the right. Pathways with higher enrichment score indicate more 
+as well as Gilteritinib samples on the right. Pathways with higher enrichment score indicate more 
 concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Treated Early",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Gilteritinib",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-Kegg Pre-Treatment-correlation-enrichment-plot.png",
-                          "sig-included-Kegg Treated Early-correlation-enrichment-plot.png"))
+                          "sig-included-Kegg Gilteritinib-correlation-enrichment-plot.png"))
 ``` 
 
 $$\\[.2in]$$
 
-### Treated Early vs Treated late GSEA
+### Gilteritinib vs Gilteritinib + Decitabine
+
+#### GSEA
 
 Below we have a GSEA plot computed using the KEGG pathway
-database. We're comparing the Treated early samples to treated late samples. 
-Red indicates increased activity in treated late samples, while blue shows increased activity
-in treated early samples. 
+database. Next, we compare Gilteritinib samples to Gilteritinib + Decitabine treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient in both groups.
+The Gilteritinib group in this comparison comprises only patients with a corresponding Gilteritinib + Decitabine sample.
+Red indicates increased activity in Gilteritinib + Decitabine samples, while blue shows increased activity
+in Gilteritinib samples.
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
-knitr::include_graphics("sig-includedkegg Treated Early vs Treated Late-gsea-plot.png")
+```{r, include=TRUE, fig.align="center", fig.cap=c("Gilteritinib vs Gilteritinib + Decitabine")}
+knitr::include_graphics("sig-includedkegg Gilteritinib vs Gilteritinib Decitabine-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
-As we have only two treated late samples, we cannot compute correlation enrichment results
-for the treated late samples, as the correlation will always be 1.
-
-$$\\[.2in]$$
-
-## Using Reactome
-
-### Healthy vs Treated GSEA
-
-Below we have a GSEA plot computed using the Reactome pathway
-database. We're comparing the healthy donor samples to all treated samples. 
-Red indicates increased activity in treated samples, while blue shows increased activity
-in healthy samples. 
-
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated")}
-knitr::include_graphics("sig-includedreactome Healthy vs Treated-gsea-plot.png")
-```
-
-### Correlation Enrichment
-
-Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Treated samples on the right. Pathways with higher enrichment score indicate more 
+Below we show the correlation enrichment in Gilteritinib samples on the left, 
+as well as Gilteritinib + Decitabine samples on the right. Pathways with higher enrichment score indicate more 
 concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated",fig.show='hold',fig.align='center'}
-knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-plot.png",
-                          "sig-included-REACTOME Treated-correlation-enrichment-plot.png"))
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Gilteritinib - Right: Gilteritinib + Decitabine",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-Kegg Gilteritinib Restricted-correlation-enrichment-plot.png",
+                          "sig-included-Kegg Gilteritinib Decitabine-correlation-enrichment-plot.png"))
 ``` 
 
-$$\\[0.2in]$$
+$$\\[.2in]$$
 
-### Healthy vs Pre-Treatment GSEA
 
-Below we have a GSEA plot computed using the Reactome pahway
+## Using REACTOME
+
+
+### Healthy vs Pre-Treatment
+
+#### GSEA
+
+Below we have a GSEA plot computed using the REACTOME pathway
 database. We're comparing the healthy donor samples to Pre-Treatment samples. 
 Red indicates increased activity in Pre-Treatment samples, while blue shows increased activity
 in healthy samples. 
@@ -279,7 +258,7 @@ in healthy samples.
 knitr::include_graphics("sig-includedreactome Healthy vs Pre-Treatment-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Healthy samples on the left, 
 as well as Pre-Treatment samples on the right. Pathways with higher enrichment score indicate more 
@@ -294,72 +273,117 @@ knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-
 
 $$\\[0.2in]$$
 
-### Healthy vs Treated Early GSEA
+### Healthy vs Gilteritinib
 
-Below we have a GSEA plot computed using the Reactome pathway
-database. We're comparing the healthy donor samples to early period treated samples. 
-Red indicates increased activity in early treated samples, while blue shows increased activity
-in healthy samples. 
+#### GSEA
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Treated Early period")}
-knitr::include_graphics("sig-includedreactome Healthy vs Treated Early-gsea-plot.png")
+Below we have a GSEA plot computed using the REACTOME pathway
+database. We compare healthy samples to Gilteritinib treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
+in healthy samples.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Gilteritinib")}
+knitr::include_graphics("sig-includedreactome Healthy vs Gilteritinib-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
 Below we show the correlation enrichment in Healthy samples on the left, 
-as well as Early period treated samples on the right. Pathways with higher enrichment score indicate more 
+as well as Gilteritinib samples on the right. Pathways with higher enrichment score indicate more 
 concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Treated Early",fig.show='hold',fig.align='center'}
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Gilteritinib",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-plot.png",
-                          "sig-included-REACTOME Treated Early-correlation-enrichment-plot.png"))
+                          "sig-included-REACTOME Gilteritinib-correlation-enrichment-plot.png"))
 ``` 
 
 $$\\[0.2in]$$
 
-### Pre-Treatment vs Treated Early GSEA
+### Healthy vs Gilteritinib + Decitabine
 
-Below we have a GSEA plot computed using the reactome pathway
-database. We're comparing the Pre-Treatment samples to Treated Early samples. 
-Red indicates increased activity in Treated early samples, while blue shows increased activity
-in Pre-Treatment samples. 
+#### GSEA
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Treated Early")}
-knitr::include_graphics("sig-includedreactome Pre-Treatment vs Treated Early-gsea-plot.png")
+Below we have a GSEA plot computed using the REACTOME pathway
+database. Next, we compare healthy samples to Gilteritinib + Decitabine treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib Decitabine group.
+Red indicates increased activity in Gilteritinib Decitabine samples, while blue shows increased activity
+in healthy samples.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Healthy vs Gilteritinib Decitabine")}
+knitr::include_graphics("sig-includedreactome Healthy vs Gilteritinib Decibatine-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
-Below we show the correlation enrichment in Pre-Treatment samples on the left, 
-as well as Treated Early samples on the right. Pathways with higher enrichment score indicate more 
+Below we show the correlation enrichment in Healthy samples on the left, 
+as well as Gilteritinib + Decitabine samples on the right. Pathways with higher enrichment score indicate more 
 concordance among the genes in that pathway. Note that color does not have any
 meaning in correlation enrichment.
 
-```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Treated Early",fig.show='hold',fig.align='center'}
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Healthy - Right: Gilteritinib Decitabine",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-REACTOME Healthy-correlation-enrichment-plot.png",
+                          "sig-included-REACTOME Gilteritinib Decitabine-correlation-enrichment-plot.png"))
+``` 
+
+$$\\[0.2in]$$
+
+### Pre-Treatment vs Gilteritinib
+
+#### GSEA
+
+Below we have a GSEA plot computed using the REACTOME pathway
+database. Next, we compare Pre-Treatment samples to Gilteritinib treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient for the Gilteritinib group.
+Red indicates increased activity in Gilteritinib samples, while blue shows increased activity
+in Pre-Treatment.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Pre-Treatment vs Gilteritinib")}
+knitr::include_graphics("sig-includedreactome Pre-Treatment vs Gilteritinib-gsea-plot.png")
+```
+
+#### Correlation Enrichment
+
+Below we show the correlation enrichment in Pre-Treatment samples on the left, 
+as well as Gilteritinib samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
+meaning in correlation enrichment.
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Pre-Treatment - Right: Gilteritinib",fig.show='hold',fig.align='center'}
 knitr::include_graphics(c("sig-included-REACTOME Pre-Treatment-correlation-enrichment-plot.png",
-                          "sig-included-REACTOME Treated Early-correlation-enrichment-plot.png"))
+                          "sig-included-REACTOME Gilteritinib-correlation-enrichment-plot.png"))
 ``` 
 
 $$\\[.2in]$$
 
-### Treated Early vs Treated late GSEA
+### Gilteritinib vs Gilteritinib + Decitabine
 
-Below we have a GSEA plot computed using the Reactome pathway
-database. We're comparing the Treated early samples to treated late samples. 
-Red indicates increased activity in treated late samples, while blue shows increased activity
-in treated early samples. 
+#### GSEA
 
-```{r, include=TRUE, fig.align="center", fig.cap=c("Treated Early vs Treated Late")}
-knitr::include_graphics("sig-includedreactome Treated Early vs Treated Late-gsea-plot.png")
+Below we have a GSEA plot computed using the REACTOME pathway
+database. Next, we compare Gilteritinib samples to Gilteritinib + Decitabine treated samples.
+To avoid over-representing any patient, we choose the earliest sample per patient in both groups.
+The Gilteritinib group in this comparison comprises only patients with a corresponding Gilteritinib + Decitabine sample.
+Red indicates increased activity in Gilteritinib + Decitabine samples, while blue shows increased activity
+in Gilteritinib samples.
+
+```{r, include=TRUE, fig.align="center", fig.cap=c("Gilteritinib vs Gilteritinib + Decitabine")}
+knitr::include_graphics("sig-includedreactome Gilteritinib vs Gilteritinib Decitabine-gsea-plot.png")
 ```
 
-### Correlation Enrichment
+#### Correlation Enrichment
 
-As we have only two treated late samples, we cannot compute correlation enrichment results
-for the treated late samples, as the correlation will always be 1.
+Below we show the correlation enrichment in Gilteritinib samples on the left, 
+as well as Gilteritinib + Decitabine samples on the right. Pathways with higher enrichment score indicate more 
+concordance among the genes in that pathway. Note that color does not have any
+meaning in correlation enrichment.
+
+```{r, echo=FALSE,out.width="49%", out.height = "49%", fig.cap="Left: Gilteritinib - Right: Gilteritinib + Decitabine",fig.show='hold',fig.align='center'}
+knitr::include_graphics(c("sig-included-REACTOME Gilteritinib Restricted-correlation-enrichment-plot.png",
+                          "sig-included-REACTOME Gilteritinib Decitabine-correlation-enrichment-plot.png"))
+``` 
 
 $$\\[.2in]$$
 
@@ -369,115 +393,57 @@ $$\\[.2in]$$
 
 [comment]: # (Below is the code to produce all the plots seen in this markdown)
 
-```{r pathway databases, eval=FALSE, include=FALSE}
-data(ncipid)
-data("krbpaths")
-
-idx.kegg <- grepl("^KEGG_", krbpaths$names)
-names.kegg <- krbpaths$names[idx.kegg]
-names.kegg <- sub("REACTOME_", "", names.kegg)
-names.kegg <- gsub("_", " ", names.kegg)
-names.kegg <- sapply(names.kegg, function(y) paste(strwrap(y, 38), 
-                                          collapse = "\n"), 
-                         USE.NAMES = FALSE)
-desc.kegg <- krbpaths$desc[idx.kegg]
-sizes.kegg <- krbpaths$sizes[idx.kegg]
-Max <- max(sizes.kegg)
-matrix.kegg <- krbpaths$matrix[idx.kegg, 1:Max]
-keggpaths <- list(names = names.kegg,
-                 desc = desc.kegg,
-                 sizes = sizes.kegg,
-                 matrix = matrix.kegg)
-
-idx.reactome <- grepl("^REACTOME_", krbpaths$names)
-names.reactome <- krbpaths$names[idx.reactome]
-names.reactome <- sub("REACTOME_", "", names.reactome)
-names.reactome <- gsub("_", " ", names.reactome)
-names.reactome <- sapply(names.reactome, function(y) paste(strwrap(y, 50), 
-                                          collapse = "\n"), 
-                         USE.NAMES = FALSE)
-desc.reactome <- krbpaths$desc[idx.reactome]
-sizes.reactome <- krbpaths$sizes[idx.reactome]
-Max <- max(sizes.reactome)
-matrix.reactome <- krbpaths$matrix[idx.reactome, 1:Max]
-reactomepaths <- list(names = names.reactome,
-                 desc = desc.reactome,
-                 sizes = sizes.reactome,
-                 matrix = matrix.reactome)
-```
-
-```{r enrichment correlation KEGG, eval=FALSE, include=FALSE}
-
-enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = prot.mat[, healthy$Sample], 
-                                                        prefix = "Kegg Healthy", pathway.plot.size = 4, 
-                                                        geneset = keggpaths, corr.cutoff = 0.33,
-                                                        clean.names = FALSE, height = 12)
-
-enrichment.correlation.treated <- plotCorrelationEnrichment(exprs = prot.mat[,treated$Sample], 
-                                                            prefix = "Kegg Treated", pathway.plot.size = 4,
-                                                            geneset = keggpaths, corr.cutoff = 0.33,
-                                                            clean.names = FALSE, height = 12)
-
-enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = prot.mat[,treated.pre$Sample], 
-                                                        prefix = "Kegg Pre-Treatment", pathway.plot.size = 4,
-                                                        geneset = keggpaths, corr.cutoff = 0.33,
-                                                        clean.names = FALSE, height = 12)
-
-enrichment.correlation.treated.early <- plotCorrelationEnrichment(exprs = prot.mat[, treated.early$Sample], 
-                                                                  prefix = "Kegg Treated Early", pathway.plot.size = 4,
-                                                                  geneset = keggpaths, corr.cutoff = 0.33,
-                                                                  clean.names = FALSE, height = 12)
-```
-
-```{r enrichment correlation REACTOME, eval=FALSE, include=FALSE}
-
-enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = prot.mat[, healthy$Sample], 
-                                                        prefix = "REACTOME Healthy", pathway.plot.size = 4, 
-                                                        geneset = reactomepaths, corr.cutoff = 0.4,
-                                                        clean.names = FALSE, height = 12)
-
-enrichment.correlation.treated <- plotCorrelationEnrichment(exprs = prot.mat[,treated$Sample], 
-                                                            prefix = "REACTOME Treated", pathway.plot.size = 4,
-                                                            geneset = reactomepaths, corr.cutoff = 0.4,
-                                                            clean.names = FALSE, height = 12)
-
-enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = prot.mat[,treated.pre$Sample], 
-                                                        prefix = "REACTOME Pre-Treatment", pathway.plot.size = 4,
-                                                        geneset = reactomepaths, corr.cutoff = 0.4,
-                                                        clean.names = FALSE, height = 12)
-
-enrichment.correlation.treated.early <- plotCorrelationEnrichment(exprs = prot.mat[, treated.early$Sample], 
-                                                                  prefix = "REACTOME Treated Early", 
-                                                                  pathway.plot.size = 4,
-                                                                  geneset = reactomepaths, corr.cutoff = 0.4,
-                                                                  clean.names = FALSE, height = 12)
-```
-
 ```{r limma for GSEA, eval=FALSE, include=FALSE,, include=FALSE}
-## LogFC computed as treated - healthy.
-prot.diffex.treated <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated$Sample) %>%
-  rename(value = "logFC") %>%
-  mutate(Gene = rownames(.))
-
 ## LogFC computed as pre-treatment - healthy
-prot.diffex.pre <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.pre$Sample) %>%
+prot.diffex.pre <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, pre.treatment$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-## LogFC computed as early - healthy
-prot.diffex.early <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.early$Sample) %>%
+## LogFC computed as treated GILT - healthy.
+prot.diffex.gilt <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.gilt$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-## LogFC computed as early - pre-treatment
-prot.diffex.earlyvspre <- limmaTwoFactorDEAnalysis(prot.mat, treated.pre$Sample, treated.early$Sample) %>%
+## LogFC computed as treated GILT+DEC - healthy
+prot.diffex.gilt.dec <- limmaTwoFactorDEAnalysis(prot.mat, healthy$Sample, treated.gilt.and.dec$Sample) %>%
   rename(value = "logFC") %>%
   mutate(Gene = rownames(.))
 
-## LogFC computed as late - early
-prot.diffex.latevsearly <- limmaTwoFactorDEAnalysis(prot.mat, treated.early$Sample, treated.late$Sample) %>%
-  rename(value = "logFC") %>%
-  mutate(Gene = rownames(.))
+
+#### Paired comparisons for Pre vs GILT and GILT vs GILT + DEC ####
+## Pre vs GILT. logFC computed as GILT - PRE
+samples.compared <- rbind(pre.treatment, treated.gilt)
+ID <- factor(samples.compared$`BeatAML Patient ID`, levels = unique(samples.compared$`BeatAML Patient ID`))
+Treatment <- factor(samples.compared$Treatment, levels = c("PRE", "GILT"))
+design <- model.matrix(~ID+Treatment)
+fit <- lmFit(prot.mat[, samples.compared$Sample], design)
+fit <- eBayes(fit)
+prot.paired.gilt.vs.pre <- topTable(fit, coef = "TreatmentGILT", number = Inf) %>%
+  mutate(featureID = rownames(.),
+         Gene = rownames(.)) %>%
+  rename(value = logFC) %>%
+  arrange(P.Value)
+
+### To make sure the moderated t-statistics resemble those from a t.test
+# t.test(as.numeric(prot.mat["RAB5B", treated.gilt$Sample]),
+#        as.numeric(prot.mat["RAB5B", pre.treatment$Sample]),
+#        paired = T)
+
+## GILT vs GILT+DEC. logFC computed as GILT...DEC - GILT
+## Choosing only GILT samples with corresponding GILT+DEC 
+treated.gilt.restricted <- subset(summary, Treatment == "GILT") %>%
+  filter(`BeatAML Patient ID` %in% treated.gilt.and.dec$`BeatAML Patient ID`)
+samples.compared <- rbind(treated.gilt.restricted, treated.gilt.and.dec)
+ID <- factor(samples.compared$`BeatAML Patient ID`, levels = unique(samples.compared$`BeatAML Patient ID`))
+Treatment <- factor(samples.compared$Treatment, levels = c("GILT", "GILT...DEC"))
+design <- model.matrix(~ID+Treatment)
+fit <- lmFit(prot.mat[, samples.compared$Sample], design)
+fit <- eBayes(fit)
+prot.paired.giltdec.vs.gilt <- topTable(fit, coef = "TreatmentGILT...DEC", number = Inf) %>%
+  mutate(featureID = rownames(.),
+         Gene = rownames(.)) %>%
+  rename(value = logFC) %>%
+  arrange(P.Value)
 ```
 
 ```{r KEGG GSEA, eval=FALSE, include=FALSE}
@@ -510,23 +476,22 @@ term.2.gene <- as.data.frame(keggpaths$matrix) %>%
 
 term.2.name <- data.frame(term = keggpaths$names, name = keggpaths$names)
   
-plotGSEA(prot.diffex.treated, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "kegg Healthy vs Treated")
-
 plotGSEA(prot.diffex.pre, term.2.gene = term.2.gene, 
          term.2.name = term.2.name, prefix = "kegg Healthy vs Pre-Treatment")
 
-plotGSEA(prot.diffex.early, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "kegg Healthy vs Treated Early")
+plotGSEA(prot.diffex.gilt, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Healthy vs Gilteritinib")
 
-plotGSEA(prot.diffex.earlyvspre, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "kegg Pre-Treatment vs Treated Early")
+plotGSEA(prot.diffex.gilt.dec, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Healthy vs Gilteritinib Decibatine")
 
-plotGSEA(prot.diffex.latevsearly, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "kegg Treated Early vs Treated Late")
+plotGSEA(prot.paired.gilt.vs.pre, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Pre-Treatment vs Gilteritinib")
+
+plotGSEA(prot.paired.giltdec.vs.gilt, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "kegg Gilteritinib vs Gilteritinib Decitabine")
 
 ```
-
 
 ```{r REACTOME GSEA, eval=FALSE, include=FALSE}
 library(tidyr)
@@ -556,20 +521,116 @@ term.2.gene <- as.data.frame(reactomepaths$matrix) %>%
 
 term.2.name <- data.frame(term = reactomepaths$names, name = reactomepaths$names)
 
-plotGSEA(prot.diffex.treated, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "reactome Healthy vs Treated")
-
 plotGSEA(prot.diffex.pre, term.2.gene = term.2.gene, 
          term.2.name = term.2.name, prefix = "reactome Healthy vs Pre-Treatment")
 
-plotGSEA(prot.diffex.early, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "reactome Healthy vs Treated Early")
+plotGSEA(prot.diffex.gilt, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Healthy vs Gilteritinib")
 
-plotGSEA(prot.diffex.earlyvspre, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "reactome Pre-Treatment vs Treated Early")
+plotGSEA(prot.diffex.gilt.dec, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Healthy vs Gilteritinib Decibatine")
 
-plotGSEA(prot.diffex.latevsearly, term.2.gene = term.2.gene, 
-         term.2.name = term.2.name, prefix = "reactome Treated Early vs Treated Late")
+plotGSEA(prot.paired.gilt.vs.pre, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Pre-Treatment vs Gilteritinib")
 
+plotGSEA(prot.paired.giltdec.vs.gilt, term.2.gene = term.2.gene, 
+         term.2.name = term.2.name, prefix = "reactome Gilteritinib vs Gilteritinib Decitabine")
+
+```
+
+```{r enrichment correlation KEGG, eval=FALSE, include=FALSE}
+library(tidyr)
+library(leapr)
+data(ncipid)
+data("krbpaths")
+
+idx.kegg <- grepl("^KEGG_", krbpaths$names)
+names.kegg <- krbpaths$names[idx.kegg]
+names.kegg <- sub("KEGG_", "", names.kegg)
+names.kegg <- gsub("_", " ", names.kegg)
+names.kegg <- sapply(names.kegg, function(y) paste(strwrap(y, 45), 
+                                          collapse = "\n"), 
+                     USE.NAMES = FALSE)
+desc.kegg <- krbpaths$desc[idx.kegg]
+sizes.kegg <- krbpaths$sizes[idx.kegg]
+Max <- max(sizes.kegg)
+matrix.kegg <- krbpaths$matrix[idx.kegg, 1:Max]
+keggpaths <- list(names = names.kegg,
+                 desc = desc.kegg,
+                 sizes = sizes.kegg,
+                 matrix = matrix.kegg)
+
+enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = prot.mat[, healthy$Sample], 
+                                                            prefix = "Kegg Healthy", pathway.plot.size = 4, 
+                                                            geneset = keggpaths, corr.cutoff = 0.4,
+                                                            clean.names = FALSE, height = 12)
+
+enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = prot.mat[,pre.treatment$Sample], 
+                                                        prefix = "Kegg Pre-Treatment", pathway.plot.size = 4,
+                                                        geneset = keggpaths, corr.cutoff = 0.4,
+                                                        clean.names = FALSE, height = 12)
+
+enrichment.correlation.treated.gilt <- plotCorrelationEnrichment(exprs = prot.mat[,treated.gilt$Sample], 
+                                                                 prefix = "Kegg Gilteritinib", pathway.plot.size = 4,
+                                                                 geneset = keggpaths, corr.cutoff = 0.4,
+                                                                 clean.names = FALSE, height = 12)
+
+enrichment.correlation.treated.giltdec <- plotCorrelationEnrichment(exprs = prot.mat[, treated.gilt.and.dec$Sample], 
+                                                                    prefix = "Kegg Gilteritinib Decitabine", pathway.plot.size = 4,
+                                                                    geneset = keggpaths, corr.cutoff = 0.4,
+                                                                    clean.names = FALSE, height = 12)
+
+enrichment.correlation.treated.gilt.restricted <- plotCorrelationEnrichment(exprs = prot.mat[, treated.gilt.restricted$Sample], 
+                                                                            prefix = "Kegg Gilteritinib Restricted", 
+                                                                            pathway.plot.size = 4,
+                                                                            geneset = keggpaths, corr.cutoff = 0.4,
+                                                                            clean.names = FALSE, height = 12)
+```
+
+```{r enrichment correlation REACTOME, eval=FALSE, include=FALSE}
+library(tidyr)
+library(leapr)
+idx.reactome <- grepl("^REACTOME_", krbpaths$names)
+names.reactome <- krbpaths$names[idx.reactome]
+names.reactome <- sub("REACTOME_", "", names.reactome)
+names.reactome <- gsub("_", " ", names.reactome)
+names.reactome <- sapply(names.reactome, function(y) paste(strwrap(y, 45), 
+                                          collapse = "\n"), 
+                         USE.NAMES = FALSE)
+desc.reactome <- krbpaths$desc[idx.reactome]
+sizes.reactome <- krbpaths$sizes[idx.reactome]
+Max <- max(sizes.reactome)
+matrix.reactome <- krbpaths$matrix[idx.reactome, 1:Max]
+reactomepaths <- list(names = names.reactome,
+                 desc = desc.reactome,
+                 sizes = sizes.reactome,
+                 matrix = matrix.reactome)
+
+enrichment.correlation.healthy <- plotCorrelationEnrichment(exprs = prot.mat[, healthy$Sample], 
+                                                            prefix = "REACTOME Healthy", pathway.plot.size = 4, 
+                                                            geneset = reactomepaths, corr.cutoff = 0.4,
+                                                            clean.names = FALSE, height = 12)
+
+enrichment.correlation.pre <- plotCorrelationEnrichment(exprs = prot.mat[,pre.treatment$Sample], 
+                                                        prefix = "REACTOME Pre-Treatment", pathway.plot.size = 4,
+                                                        geneset = reactomepaths, corr.cutoff = 0.4,
+                                                        clean.names = FALSE, height = 12)
+
+enrichment.correlation.treated.gilt <- plotCorrelationEnrichment(exprs = prot.mat[,treated.gilt$Sample], 
+                                                                 prefix = "REACTOME Gilteritinib", pathway.plot.size = 4,
+                                                                 geneset = reactomepaths, corr.cutoff = 0.4,
+                                                                 clean.names = FALSE, height = 12)
+
+enrichment.correlation.treated.giltdec <- plotCorrelationEnrichment(exprs = prot.mat[, treated.gilt.and.dec$Sample], 
+                                                                    prefix = "REACTOME Gilteritinib Decitabine", 
+                                                                    pathway.plot.size = 4,
+                                                                    geneset = reactomepaths, corr.cutoff = 0.4,
+                                                                    clean.names = FALSE, height = 12)
+
+enrichment.correlation.treated.gilt.restricted <- plotCorrelationEnrichment(exprs = prot.mat[, treated.gilt.restricted$Sample], 
+                                                                            prefix = "REACTOME Gilteritinib Restricted", 
+                                                                            pathway.plot.size = 4,
+                                                                            geneset = reactomepaths, corr.cutoff = 0.4,
+                                                                            clean.names = FALSE, height = 12)
 ```
 

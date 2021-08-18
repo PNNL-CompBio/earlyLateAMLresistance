@@ -59,7 +59,8 @@ kbl(show) %>%
 In this report, we collect the results of rank based GSEA, as well as differential expression. We perform
 5 comparisons overall. First, we compare the Healthy group to the Pre-Treatment group, the Gilteritinib group, and the 
 Decitabine group. As some patients are over-represented in these groups (such as patient 5104), we choose the *earliest*
-representative sample per patient per group.
+representative sample per patient per group. Finally, we have the two paired comparisons of Gilteritinib vs Pre-Treatment and 
+Gilteritinib + Decitabine vs Gilteritinib.
 
 ```{r prepare groups, limma, and early vs late gsea, include=FALSE}
 

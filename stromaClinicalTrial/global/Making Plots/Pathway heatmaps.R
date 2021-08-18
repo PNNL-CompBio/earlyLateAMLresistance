@@ -6,60 +6,55 @@ library(leapr)
 library(ggplot2)
 library(scales)
 library(gridExtra)
-library(readr)
 library(rstudioapi)
+library(readr)
+
+## Saving plots to the folder in which this script is located!!
+current_path <- getActiveDocumentContext()$path 
+setwd(dirname(current_path))
+
 source("../../../Util/synapseUtil.R")
 
 ############## This script generates the GSEA heatmaps seen in file 14.
 
 ########################### Setting up ##########################
 
-## Saving plots to the folder in which this script is located!!
-current_path <- getActiveDocumentContext()$path 
-setwd(dirname(current_path))
-
 # corrected for loading mass and plexID, long time and subtle
-g.gene.corrected <- querySynapseTable("syn25706561")
+g.gene.corrected <- querySynapseTable("syn26047126")
 
 prot.dat <- g.gene.corrected
 
-# from here we can select just the metadata of interest
-metadata.columns = c('Sample','BeatAML Patient ID','Plex','Loading Mass', 'Description')
-summary <- prot.dat%>%
-  select(metadata.columns)%>%
-  distinct()
-summary$Description <- as.character(summary$Description)
-summary$Type <- case_when(summary$`BeatAML Patient ID` == "Healthy Donor Stroma" ~ "Healthy Donor Stroma",
-                          summary$`BeatAML Patient ID` == "Cell line" ~ "Cell line")
-summary[is.na(summary$Type), "Type"] <- "Treated"
+## We have the metadata selected from the long form table
+summary <- g.gene.corrected[1:40, c("Sample", "BeatAML Patient ID", "Plex", 
+                                    "Loading Mass", "Description", "Period", "Treatment")]
+rownames(summary) <- summary$Sample
 
-## Elie has corrected the time period annotation. Adding a pre-treatment, early, and late period.
-correct.time.annotation <- as.data.frame(read_csv("../../Updated time period annotation.csv"))
-summary$Period <- correct.time.annotation[summary$Sample, "Classification"]
-summary$Period <- case_when(grepl("early", summary$Period) ~ "Early",
-                            grepl("Late", summary$Period) ~ "Late",
-                            grepl("pre-treatment", summary$Period) ~ "Pre-Treatment")
+## Organizing time points into the right order (not alphanumeric)
+time.points <- c("P2 Pre-Study", "P2 Cycle 1 Day 1", "P2 Cycle 1 Day 28", "P2 Cycle 2 Day 28", "P2 Cycle 3 Day 28", 
+                 "P1B Cycle 1 Day 1", "P1B Cycle 1 Day 28", "P1B Cycle 2 Day 28", "P1B Cycle 3 Day 28", "P1B Cycle 6 Day 28",
+                 "P1B Cycle 9 Day 28", "P1B Conc Cycle 9 Day 28") %>%
+  factor(.)
+
+
+summary$Description <- factor(summary$Description, levels = time.points)
+summary <- summary[sort(summary$Sample), ]
+summary$`BeatAML Patient ID` <- factor(summary$`BeatAML Patient ID`, levels = unique(summary$`BeatAML Patient ID`))
+summary$Treatment <- make.names(summary$Treatment)
 
 ##select the samples of interest
-healthy <- subset(summary, Type == 'Healthy Donor Stroma')%>%
-  select(Sample)%>%
-  unique()
+healthy <- subset(summary, `BeatAML Patient ID` == 'Healthy Donor Stroma')
 
-patients <- subset(summary, Type == "Treated") %>%
-  select(Sample, `BeatAML Patient ID`, Period, Plex) %>%
-  dplyr::rename(ID = `BeatAML Patient ID`) %>%
-  mutate(Plex = as.character(Plex)) %>%
-  unique()
+pre.treatment <- subset(summary, Period == "Pre-Treatment")
 
 ##then we spread the proteomics data into a matrix
 colnames(prot.dat)[[1]] <- "Gene"
 prot.mat <- prot.dat%>%
   select(LogRatio,Sample,Gene)%>%
   tidyr::pivot_wider(values_from='LogRatio',names_from='Sample',
-                     values_fn=list(LogRatio=mean),values_fill=0.0)%>%
+                     values_fn=list(LogRatio=mean))%>%
   tibble::column_to_rownames('Gene')
 
-### Pathway libraries
+######### Pathway libraries  ############
 
 library(tidyr)
 library(leapr)
@@ -109,41 +104,40 @@ reactome.term.2.gene <- as.data.frame(reactomepaths$matrix) %>%
 reactome.term.2.name <- data.frame(term = reactomepaths$names, name = reactomepaths$names)
 
 
-####################### Getting GSEA Tables for every patient Early vs Pre-Treatment #######################
+####################### Getting GSEA Tables for every patient Gilteritinib vs Pre-Treatment #######################
 
 pvalue.cutoff <- 0.05
 
 ## There are two comparisons we will make, using the patients for which we have the appropriate data.
-## We begin with the Early vs Pre-Treatment comparison. For this we have 6 patients we can use.
+## We begin with the Gilteritinib vs Pre-Treatment comparison. For this we have 6 patients we can use.
 
-all.patient.ids <- unique(patients$ID)
-pre.treatment.ids <- patients %>%
+pre.treatment.ids <- summary %>%
   dplyr::filter(Period == "Pre-Treatment") %>%
-  dplyr::select(ID)
+  select(`BeatAML Patient ID`)
 
-pre.treatment.ids <- pre.treatment.ids$ID
-  
+pre.treatment.ids <- as.character(pre.treatment.ids$`BeatAML Patient ID`)
+
 res <- list()
 
 for (patient.id in pre.treatment.ids){
   print(patient.id)
   
-  pretreatment <- patients %>%
-    filter(ID == patient.id, Period == "Pre-Treatment")
-  early <- patients %>%
-    filter(ID == patient.id, Period == "Early")
+  pretreatment <- summary %>%
+    filter(`BeatAML Patient ID` == patient.id, Treatment == "PRE")
+  gilt <- summary %>%
+    filter(`BeatAML Patient ID` == patient.id, Treatment == "GILT")
   
   means.pretreatment <- prot.mat[, pretreatment$Sample]
   if (!is.null(dim(means.pretreatment))) {
     means.pretreatment <- apply(means.pretreatment, 1, FUN = mean, na.rm = T)
   }
   
-  means.early <- prot.mat[, early$Sample]
-  if (!is.null(dim(means.early))) {
-    means.early <- apply(means.early, 1, FUN = mean, na.rm = T)
+  means.gilt <- prot.mat[, gilt$Sample]
+  if (!is.null(dim(means.gilt))) {
+    means.gilt <- apply(means.gilt, 1, FUN = mean, na.rm = T)
   }
   
-  df.gsea <- data.frame(value = means.early - means.pretreatment, 
+  df.gsea <- data.frame(value = means.gilt - means.pretreatment, 
                         Gene = rownames(prot.mat), 
                         row.names = rownames(prot.mat)) %>%
     filter(!is.na(value))
@@ -214,9 +208,9 @@ for (patient.id in pre.treatment.ids){
   res.gobp.pre[[patient.id]] <- x
 }
 
-save.image("GSEA enrichment - Early vs Pre-treatment for all patients.RData")
+save.image("GSEA enrichment - Gilteritinib vs Pre-treatment for all patients.RData")
 
-################### Combining the GSEA's Early vs Pre-Treatment####################
+################### Combining the GSEA's Gilteritinib vs Pre-Treatment ####################
 
 
 IDs <- c("5087", "5104", "5145", "5174", "5210", "5180")
@@ -262,7 +256,7 @@ sig.pathways <- which(apply(kegg.significance, 1, min) < pvalue.cutoff) %>%
 
 kegg.significance <- kegg.significance[intersect(sig.pathways, top.pathways), ]
 kegg.heatmap <- kegg.enrichment[intersect(sig.pathways, top.pathways), ]
-  
+
 
 ##### REACTOME
 
@@ -272,11 +266,11 @@ number.chosen <- 50
 
 pathways.present <- rownames(res.reactome.pre[["5087"]])
 reactome.all <- cbind("5087" = res.reactome.pre[["5087"]][pathways.present, ],
-                  "5104" = res.reactome.pre[["5104"]][pathways.present, ], 
-                  "5145" = res.reactome.pre[["5145"]][pathways.present, ],
-                  "5174" = res.reactome.pre[["5174"]][pathways.present, ], 
-                  "5210" = res.reactome.pre[["5210"]][pathways.present, ],
-                  "5180" = res.reactome.pre[["5180"]][pathways.present, ])
+                      "5104" = res.reactome.pre[["5104"]][pathways.present, ], 
+                      "5145" = res.reactome.pre[["5145"]][pathways.present, ],
+                      "5174" = res.reactome.pre[["5174"]][pathways.present, ], 
+                      "5210" = res.reactome.pre[["5210"]][pathways.present, ],
+                      "5180" = res.reactome.pre[["5180"]][pathways.present, ])
 enrichment.cols <- which(grepl("Enrichment", colnames(reactome.all)))
 significance.cols <- which(grepl("pvalue", colnames(reactome.all)))
 
@@ -387,7 +381,7 @@ gobp.significance.cutoff <- lapply(gobp.significance, Vectorize(helper)) %>%
 
 
 ## KEGG
-png(filename = "Pathway heatmap Early vs Pre-Treatment - KEGG.png", width = 1380, height = 2500)
+png(filename = "Pathway heatmap Gilteritinib vs Pre-Treatment - KEGG.png", width = 1380, height = 2500)
 p <- heatmap.2(kegg.heatmap, 
                cellnote = kegg.significance.cutoff,
                scale = 'none', 
@@ -410,7 +404,7 @@ dev.off()
 
 
 ## REACTOME
-png(filename = "Pathway heatmap Early vs Pre-Treatment - REACTOME.png", width = 1380, height = 2600)
+png(filename = "Pathway heatmap Gilteritinib vs Pre-Treatment - REACTOME.png", width = 1380, height = 2600)
 p <- heatmap.2(reactome.heatmap, 
                cellnote = reactome.significance.cutoff,
                scale = 'none', 
@@ -433,7 +427,7 @@ dev.off()
 
 
 ## GENE ONTOLOGY BIOLOGICAL PROCESS
-png(filename = "Pathway heatmap Early vs Pre-Treatment - GENE ONTOLOGY.png", width = 1380, height = 2600)
+png(filename = "Pathway heatmap Gilteritinib vs Pre-Treatment - GENE ONTOLOGY.png", width = 1380, height = 2600)
 p <- heatmap.2(gobp.heatmap, 
                cellnote = gobp.significance.cutoff,
                scale = 'none', 
@@ -457,48 +451,49 @@ dev.off()
 
 ############################### RESET #############################################
 
-### Clears all objects in environment, as we compare Early to Late below.
+### Clears all objects in environment, as we compare other groups below.
 rm(list = ls())
 
 ### Load code from the Setup section above.
 
 
-####################### Getting GSEA Tables for every patient Early vs Late #######################
+####################### Getting GSEA Tables for every patient Gilteritinib vs Gilteritinib + Decitabine #######################
 
 pvalue.cutoff <- 0.05
 
 ## There are two comparisons we will make, using the patients for which we have the appropriate data.
 ## Here we have the Early vs Late comparison, for which we can use 2 patients.
 
-all.patient.ids <- unique(patients$ID)
+gilt.dec.ids <- summary %>%
+  dplyr::filter(Treatment == "GILT...DEC") %>%
+  dplyr::select(`BeatAML Patient ID`)
 
-late.treatment.ids <- patients %>%
-  dplyr::filter(Period == "Late") %>%
-  dplyr::select(ID)
+gilt.dec.ids <- as.character(gilt.dec.ids$`BeatAML Patient ID`) %>%
+  unique()
 
-late.treatment.ids <- late.treatment.ids$ID
+IDs <- gilt.dec.ids
 
 res <- list()
 
-for (patient.id in late.treatment.ids){
+for (patient.id in gilt.dec.ids){
   print(patient.id)
   
-  early <- patients %>%
-    filter(ID == patient.id, Period == "Early")
-  late <- patients %>%
-    filter(ID == patient.id, Period == "Late")
+  gilt <- summary %>%
+    filter(`BeatAML Patient ID` == patient.id, Treatment == "GILT")
+  gilt.dec <- summary %>%
+    filter(`BeatAML Patient ID` == patient.id, Treatment == "GILT...DEC")
   
-  means.early <- prot.mat[, early$Sample]
-  if (!is.null(dim(means.early))) {
-    means.early <- apply(means.early, 1, FUN = mean, na.rm = T)
+  means.gilt <- prot.mat[, gilt$Sample]
+  if (!is.null(dim(means.gilt))) {
+    means.gilt <- apply(means.gilt, 1, FUN = mean, na.rm = T)
   }
   
-  means.late <- prot.mat[, late$Sample]
-  if (!is.null(dim(means.late))) {
-    means.late <- apply(means.late, 1, FUN = mean, na.rm = T)
+  means.gilt.dec <- prot.mat[, gilt.dec$Sample]
+  if (!is.null(dim(means.gilt.dec))) {
+    means.gilt.dec <- apply(means.gilt.dec, 1, FUN = mean, na.rm = T)
   }
   
-  df.gsea <- data.frame(value = means.late - means.early, 
+  df.gsea <- data.frame(value = means.gilt.dec - means.gilt, 
                         Gene = rownames(prot.mat), 
                         row.names = rownames(prot.mat)) %>%
     filter(!is.na(value))
@@ -533,7 +528,7 @@ res.gobp.late <- list()
 
 ## selecting only relevant columns
 
-for (patient.id in late.treatment.ids){
+for (patient.id in gilt.dec.ids){
   prefix <- paste(patient.id, "KEGG")
   gsea <- res[[prefix]]
   
@@ -568,12 +563,9 @@ for (patient.id in late.treatment.ids){
   res.gobp.late[[patient.id]] <- x
 }
 
-save.image("GSEA enrichment - Late vs Early for all patients.RData")
+save.image("GSEA enrichment - Gilteritinib + Decitabine vs Gilteritinib for all patients.RData")
 
-################### Combining the GSEA's Early vs Late ####################
-
-
-IDs <- c("5029", "5104")
+################### Combining the GSEA's Gilteritinib + Decitabine vs Gilteritinib ####################
 
 
 ##### KEGG
@@ -583,7 +575,8 @@ number.chosen <- 50
 
 pathways.present <- rownames(res.kegg.late[["5029"]])
 kegg.all <- cbind("5029" = res.kegg.late[["5029"]][pathways.present, ],
-                  "5104" = res.kegg.late[["5104"]][pathways.present, ])
+                  "5104" = res.kegg.late[["5104"]][pathways.present, ],
+                  "5174" = res.kegg.late[["5174"]][pathways.present, ])
 enrichment.cols <- which(grepl("Enrichment", colnames(kegg.all)))
 significance.cols <- which(grepl("pvalue", colnames(kegg.all)))
 
@@ -598,7 +591,7 @@ kegg.significance <- kegg.all[, c(significance.cols)] %>%
 p.values <- as.list(kegg.significance) %>%
   p.adjust(method = "BH") %>%
   matrix(dimnames = list(rownames(kegg.significance), colnames(kegg.significance)),
-         ncol = 2)
+         ncol = 3)
 kegg.significance <- p.values
 
 ## Only the top 50 most enriched pathways are selected.
@@ -622,7 +615,8 @@ number.chosen <- 50
 
 pathways.present <- rownames(res.reactome.late[["5029"]])
 reactome.all <- cbind("5029" = res.reactome.late[["5029"]][pathways.present, ],
-                      "5104" = res.reactome.late[["5104"]][pathways.present, ])
+                      "5104" = res.reactome.late[["5104"]][pathways.present, ],
+                      "5174" = res.reactome.late[["5174"]][pathways.present, ])
 enrichment.cols <- which(grepl("Enrichment", colnames(reactome.all)))
 significance.cols <- which(grepl("pvalue", colnames(reactome.all)))
 
@@ -637,7 +631,7 @@ reactome.significance <- reactome.all[, c(significance.cols)] %>%
 p.values <- as.list(reactome.significance) %>%
   p.adjust(method = "BH") %>%
   matrix(dimnames = list(rownames(reactome.significance), colnames(reactome.significance)),
-         ncol = 2)
+         ncol = 3)
 reactome.significance <- p.values
 
 ## Only the top 50 most enriched pathways are selected.
@@ -660,7 +654,8 @@ number.chosen <- 50
 
 pathways.present <- rownames(res.gobp.late[["5029"]])
 gobp.all <- cbind("5029" = res.gobp.late[["5029"]][pathways.present, ],
-                  "5104" = res.gobp.late[["5104"]][pathways.present, ])
+                  "5104" = res.gobp.late[["5104"]][pathways.present, ],
+                  "5174" = res.gobp.late[["5174"]][pathways.present, ])
 enrichment.cols <- which(grepl("Enrichment", colnames(gobp.all)))
 significance.cols <- which(grepl("pvalue", colnames(gobp.all)))
 
@@ -679,7 +674,7 @@ gobp.significance <- gobp.all[, c(1, significance.cols)] %>%
 p.values <- as.list(gobp.significance) %>%
   p.adjust(method = "BH") %>%
   matrix(dimnames = list(rownames(gobp.significance), colnames(gobp.significance)),
-         ncol = 2)
+         ncol = 3)
 gobp.significance <- p.values
 
 ## Only the top 50 most enriched pathways are selected.
@@ -722,15 +717,15 @@ helper <- function(x) {
 }
 
 kegg.significance.cutoff <- lapply(kegg.significance, Vectorize(helper)) %>%
-  matrix(ncol = 2)
+  matrix(ncol = 3)
 reactome.significance.cutoff <- lapply(reactome.significance, Vectorize(helper)) %>%
-  matrix(ncol = 2)
+  matrix(ncol = 3)
 gobp.significance.cutoff <- lapply(gobp.significance, Vectorize(helper)) %>%
-  matrix(ncol = 2)
+  matrix(ncol = 3)
 
 
 ## KEGG
-png(filename = "Pathway heatmap Early vs Late - KEGG.png", width = 1380, height = 2500)
+png(filename = "Pathway heatmap Gilteritinib + Decitabine vs Gilteritinib - KEGG.png", width = 1380, height = 2500)
 p <- heatmap.2(kegg.heatmap, 
                cellnote = kegg.significance.cutoff,
                scale = 'none', 
@@ -753,7 +748,7 @@ dev.off()
 
 
 ## REACTOME
-png(filename = "Pathway heatmap Early vs Late - REACTOME.png", width = 1380, height = 2600)
+png(filename = "Pathway heatmap Gilteritinib + Decitabine vs Gilteritinib - REACTOME.png", width = 1380, height = 2600)
 p <- heatmap.2(reactome.heatmap, 
                cellnote = reactome.significance.cutoff,
                scale = 'none', 
@@ -776,7 +771,7 @@ dev.off()
 
 
 ## GENE ONTOLOGY BIOLOGICAL PROCESS
-png(filename = "Pathway heatmap Early vs Late - GENE ONTOLOGY.png", width = 1380, height = 2600)
+png(filename = "Pathway heatmap Gilteritinib + Decitabine vs Gilteritinib - GENE ONTOLOGY.png", width = 1380, height = 2600)
 p <- heatmap.2(gobp.heatmap, 
                cellnote = gobp.significance.cutoff,
                scale = 'none', 
